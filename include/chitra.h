@@ -76,6 +76,35 @@ typedef struct {
 } Chitra_DrawBatch;
 
 /* =========================================================================
+ * Chitra Input Abstraction
+ * ========================================================================= */
+
+typedef enum {
+    CHITRA_EVENT_NONE = 0,
+    CHITRA_EVENT_MOUSE_MOVE,
+    CHITRA_EVENT_MOUSE_DOWN,
+    CHITRA_EVENT_MOUSE_UP,
+    CHITRA_EVENT_MOUSE_SCROLL,
+    CHITRA_EVENT_KEY_DOWN,
+    CHITRA_EVENT_KEY_UP,
+    CHITRA_EVENT_CHAR,
+    CHITRA_EVENT_RESIZED
+} Chitra_EventType;
+
+typedef struct {
+    Chitra_EventType type;
+    float mouse_x;
+    float mouse_y;
+    float scroll_x;
+    float scroll_y;
+    int button;         /* 0: Left, 1: Right, 2: Middle */
+    int key_code;       /* Hardware key code */
+    uint32_t char_code; /* UTF-8 char code */
+    int window_width;
+    int window_height;
+} Chitra_InputEvent;
+
+/* =========================================================================
  * Chitra Engine API
  * ========================================================================= */
 
@@ -92,7 +121,7 @@ typedef struct {
     int target_fps;
     void (*on_init)(void);
     void (*on_frame)(void);
-    void (*on_event)(const void* event);
+    void (*on_event)(const Chitra_InputEvent* event);
 } Chitra_Config;
 
 /* Initializes and runs the standalone Chitra engine. */

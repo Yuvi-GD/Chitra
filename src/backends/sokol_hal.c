@@ -183,7 +183,30 @@ static void sokol_event(const sapp_event* e) {
         chitra_cmd_set_dirty();
         s_dirty_countdown = 3;
     }
-    if (s_config.on_event) s_config.on_event(e);
+    
+    if (s_config.on_event) {
+        Chitra_InputEvent ce = {0};
+        ce.mouse_x = e->mouse_x;
+        ce.mouse_y = e->mouse_y;
+        ce.window_width = e->window_width;
+        ce.window_height = e->window_height;
+        
+        switch (e->type) {
+            case SAPP_EVENTTYPE_MOUSE_MOVE:   ce.type = CHITRA_EVENT_MOUSE_MOVE; break;
+            case SAPP_EVENTTYPE_MOUSE_DOWN:   ce.type = CHITRA_EVENT_MOUSE_DOWN; ce.button = e->mouse_button; break;
+            case SAPP_EVENTTYPE_MOUSE_UP:     ce.type = CHITRA_EVENT_MOUSE_UP;   ce.button = e->mouse_button; break;
+            case SAPP_EVENTTYPE_MOUSE_SCROLL: ce.type = CHITRA_EVENT_MOUSE_SCROLL; ce.scroll_x = e->scroll_x; ce.scroll_y = e->scroll_y; break;
+            case SAPP_EVENTTYPE_KEY_DOWN:     ce.type = CHITRA_EVENT_KEY_DOWN;   ce.key_code = e->key_code; break;
+            case SAPP_EVENTTYPE_KEY_UP:       ce.type = CHITRA_EVENT_KEY_UP;     ce.key_code = e->key_code; break;
+            case SAPP_EVENTTYPE_CHAR:         ce.type = CHITRA_EVENT_CHAR;       ce.char_code = e->char_code; break;
+            case SAPP_EVENTTYPE_RESIZED:      ce.type = CHITRA_EVENT_RESIZED;    break;
+            default: ce.type = CHITRA_EVENT_NONE; break;
+        }
+        
+        if (ce.type != CHITRA_EVENT_NONE) {
+            s_config.on_event(&ce);
+        }
+    }
 }
 
 /* -------------------------------------------------------------------------
