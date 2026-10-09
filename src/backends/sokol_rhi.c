@@ -13,6 +13,14 @@
 #define CHITRA_MAX_VERTICES (128 * 1024)
 #define CHITRA_MAX_INDICES  (CHITRA_MAX_VERTICES * 6 / 4)
 
+typedef struct {
+    sg_image img;
+    sg_view view;
+    bool active;
+} RHI_Texture;
+
+#define MAX_RHI_TEXTURES 32
+
 static struct {
     sg_pipeline shape_pip;
     sg_pipeline text_pip;
@@ -23,9 +31,14 @@ static struct {
     sg_buffer shape_staging;
     sg_buffer text_staging;
     sg_buffer index_staging;
+    sg_buffer atlas_staging;
+    
+    sg_sampler sampler;
     
     int current_width;
     int current_height;
+    
+    RHI_Texture textures[MAX_RHI_TEXTURES];
 } s_rhi = {0};
 
 static void rhi_init(void) {
@@ -73,6 +86,12 @@ static void rhi_init(void) {
         .size = CHITRA_MAX_INDICES * sizeof(uint16_t),
         .usage = { .staging_index_buffer = true, .write_transient = true, .copy_src = true },
         .label = "chitra_index_staging"
+    });
+    
+    s_rhi.atlas_staging = sg_make_buffer(&(sg_buffer_desc){
+        .size = 1024 * 1024 * 4, /* Allow up to 4MB atlas */
+        .usage = { .staging_buffer = true, .write_transient = true, .copy_src = true },
+        .label = "chitra_atlas_staging"
     });
     
     /* 3. Shape Pipeline */
@@ -183,7 +202,10 @@ static void rhi_draw_batch(const Chitra_DrawBatch* batch) {
         sg_draw((int)batch->base_element, (int)batch->num_elements, 1);
     }
     else if (batch->pipeline == CHITRA_PIPELINE_TEXTURE) {
-        /* TODO: Bind texture atlas based on batch->texture_id */
+        if (batch->texture_id < MAX_RHI_TEXTURES && s_rhi.textures[batch->texture_id].active) {
+            s_rhi.text_bind.views[0] = s_rhi.textures[batch->texture_id].view;
+        }
+        
         sg_apply_pipeline(s_rhi.text_pip);
         sg_apply_bindings(&s_rhi.text_bind);
         
@@ -199,6 +221,67 @@ static void rhi_end_frame(void) {
     sg_commit();
 }
 
+static uint16_t rhi_create_texture(int width, int height) {
+    int slot = -1;
+    for (int i = 1; i < MAX_RHI_TEXTURES; i++) {
+        if (!s_rhi.textures[i].active) { slot = i; break; }
+    }
+    if (slot == -1) return 0;
+    
+    sg_image img = sg_make_image(&(sg_image_desc){
+        .width = width,
+        .height = height,
+        .pixel_format = SG_PIXELFORMAT_R8,
+        .usage = { .copy_dst = true },
+        .label = "chitra-texture"
+    });
+    
+    sg_view view = sg_make_view(&(sg_view_desc){
+        .texture = { .image = img },
+        .label = "chitra-view"
+    });
+    
+    if (s_rhi.sampler.id == 0) {
+        s_rhi.sampler = sg_make_sampler(&(sg_sampler_desc){
+            .min_filter = SG_FILTER_LINEAR,
+            .mag_filter = SG_FILTER_LINEAR,
+            .wrap_u = SG_WRAP_CLAMP_TO_EDGE,
+            .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
+            .label = "chitra-sampler"
+        });
+        s_rhi.text_bind.samplers[0] = s_rhi.sampler;
+    }
+    
+    s_rhi.textures[slot].img = img;
+    s_rhi.textures[slot].view = view;
+    s_rhi.textures[slot].active = true;
+    
+    return (uint16_t)slot;
+}
+
+static void rhi_update_texture(uint16_t id, const unsigned char* data, int width, int height) {
+    if (id == 0 || id >= MAX_RHI_TEXTURES || !s_rhi.textures[id].active) return;
+    sg_image img = s_rhi.textures[id].img;
+    
+    sg_write_buffer_transient(&(sg_write_buffer_desc){
+        .src.data = { .ptr = data, .size = (size_t)(width * height) },
+        .dst.buffer = s_rhi.atlas_staging
+    });
+    
+    sg_copy_buffer_to_image(&(sg_copy_buffer_to_image_desc){
+        .src = { .buffer = s_rhi.atlas_staging },
+        .dst = { .image = img },
+        .size = { .width = width, .height = height, .num_slices = 1 }
+    });
+}
+
+static void rhi_destroy_texture(uint16_t id) {
+    if (id == 0 || id >= MAX_RHI_TEXTURES || !s_rhi.textures[id].active) return;
+    sg_destroy_view(s_rhi.textures[id].view);
+    sg_destroy_image(s_rhi.textures[id].img);
+    s_rhi.textures[id].active = false;
+}
+
 static void rhi_cleanup(void) {
     sg_shutdown();
 }
@@ -209,6 +292,9 @@ static const Chitra_RHI_API s_api = {
     .upload_vertices = rhi_upload_vertices,
     .set_scissor = rhi_set_scissor,
     .draw_batch = rhi_draw_batch,
+    .create_texture = rhi_create_texture,
+    .update_texture = rhi_update_texture,
+    .destroy_texture = rhi_destroy_texture,
     .end_frame = rhi_end_frame,
     .cleanup = rhi_cleanup
 };

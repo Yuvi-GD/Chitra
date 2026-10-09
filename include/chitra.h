@@ -83,6 +83,13 @@ typedef struct {
     int width;
     int height;
     const char* title;
+    /* Target FPS (frame cap).
+     * 0 = VSync (typically capped at the monitor refresh rate).
+     * Positive values disable VSync and apply a manual cap. The manual cap
+     * waits in Sokol's frame callback, so event processing can be delayed by
+     * up to one target frame interval.
+     */
+    int target_fps;
     void (*on_init)(void);
     void (*on_frame)(void);
     void (*on_event)(const void* event);
@@ -103,6 +110,15 @@ void chitra_draw_rect(int z_index, float x, float y, float w, float h,
 /* Push pre-built text vertices into the frame command queue. */
 void chitra_draw_text_vertices(int z_index, uint16_t texture_id,
                                const Chitra_TextVertex* vertices, int quad_count);
+
+/* Load a TTF font from a file and return its font_id. Returns -1 on failure. */
+int chitra_load_font(const char* name, const char* path);
+
+/* Draw a string of text at the given position. */
+void chitra_draw_text(int z_index, int font_id, float size, float x, float y, const char* text, uint32_t color);
+
+/* Measure the width and line-height of a string of text. */
+void chitra_measure_text(int font_id, float size, const char* text, float* out_width, float* out_height);
 
 /* Push/pop a hardware scissor clipping region. */
 void chitra_push_clip(int x, int y, int w, int h);

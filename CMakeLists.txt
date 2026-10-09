@@ -68,6 +68,7 @@ add_library(chitra STATIC
     src/chitra.c
     src/chitra_arena.c
     src/chitra_cmd.c
+    src/chitra_font.c
     src/backends/sokol_hal.c
     src/backends/sokol_rhi.c
     src/backends/sokol_impl.c
@@ -83,6 +84,7 @@ target_include_directories(chitra PUBLIC
 target_include_directories(chitra PRIVATE
     "${SOKOL_DIR}"
     "${SOKOL_DIR}/util"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fontstash"
 )
 
 # Pass the backend selection macro to the C compiler (e.g., -DSOKOL_D3D11)

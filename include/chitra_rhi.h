@@ -28,6 +28,11 @@ typedef struct {
     /* Dispatch a pre-merged batch of elements. */
     void (*draw_batch)(const Chitra_DrawBatch* batch);
     
+    /* Texture management */
+    uint16_t (*create_texture)(int width, int height);
+    void (*update_texture)(uint16_t id, const unsigned char* data, int width, int height);
+    void (*destroy_texture)(uint16_t id);
+    
     void (*end_frame)(void);
     
     void (*cleanup)(void);
