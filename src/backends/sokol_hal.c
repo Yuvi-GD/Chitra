@@ -1,45 +1,93 @@
-#if defined(_WIN32)
-#define SOKOL_D3D11
-#elif defined(__APPLE__)
-#define SOKOL_METAL
-#else
-#define SOKOL_GLCORE
-#endif
 
 #include "sokol_app.h"
 #include "sokol_log.h"
 #include "chitra_hal.h"
 #include "chitra_rhi.h"
+#include "chitra_cmd.h"
 #include <stdio.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <dwmapi.h>
+#ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
+#define DWMWA_USE_IMMERSIVE_DARK_MODE 20
+#endif
+#else
+#include <time.h>
+#endif
+
 static sapp_desc s_desc = {0};
+static Chitra_Config s_config = {0};
 
 static void sokol_init(void) {
-    printf("[Chitra:Sokol] HAL Initialized.\n");
     chitra_rhi_get_api()->init();
+    
+#ifdef _WIN32
+    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    if (hwnd) {
+        BOOL dark = TRUE;
+        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &dark, sizeof(dark));
+    }
+#endif
+
+    if (s_config.on_init) s_config.on_init();
 }
+
+static int s_last_w = 0;
+static int s_last_h = 0;
+static int s_dirty_frame_countdown = 3;
 
 static void sokol_frame(void) {
     int w = sapp_width();
     int h = sapp_height();
     if (w == 0 || h == 0) return;
     
-    chitra_rhi_get_api()->begin_frame(w, h);
-    // Future: Chitra core will flush command queues here
-    chitra_rhi_get_api()->end_frame();
+    if (w != s_last_w || h != s_last_h) {
+        chitra_cmd_set_dirty();
+        s_last_w = w;
+        s_last_h = h;
+    }
+    
+    if (s_config.on_frame) s_config.on_frame();
+    
+    if (chitra_cmd_is_dirty()) {
+        /* Upload buffers OUTSIDE of the render pass if dirty */
+        chitra_cmd_prepare();
+        s_dirty_frame_countdown = 3; /* Draw for 3 frames to update triple-buffering */
+    }
+    
+    if (s_dirty_frame_countdown > 0) {
+        chitra_rhi_get_api()->begin_frame(w, h);
+        chitra_cmd_draw();
+        chitra_rhi_get_api()->end_frame();
+        
+        s_dirty_frame_countdown--;
+    } else {
+#ifdef _WIN32
+        Sleep(16);
+#else
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = 16000000;
+        nanosleep(&ts, NULL);
+#endif
+    }
 }
 
 static void sokol_cleanup(void) {
     chitra_rhi_get_api()->cleanup();
-    printf("[Chitra:Sokol] HAL Cleanup.\n");
 }
 
 static void sokol_event(const sapp_event* e) {
-    // Pass events to Chitra core here later
+    if (e->type == SAPP_EVENTTYPE_RESIZED) {
+        chitra_cmd_set_dirty();
+    }
+    if (s_config.on_event) s_config.on_event(e);
 }
 
 static void hal_init(const Chitra_Config* config) {
     if (config) {
+        s_config = *config;
         s_desc.width = config->width;
         s_desc.height = config->height;
         s_desc.window_title = config->title;

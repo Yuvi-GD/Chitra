@@ -5,3 +5,6 @@ build/
 *.dll
 *.so
 *.dylib
+src/backends/shaders/gen/
+
+docs/
