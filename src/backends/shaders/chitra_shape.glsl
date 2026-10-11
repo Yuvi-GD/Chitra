@@ -61,7 +61,7 @@ void main() {
         float inner_dist = rounded_box_sdf(center_pos, half_size - vec2(v_radius_border.y), max(0.0, v_radius_border.x - v_radius_border.y));
         float border_alpha = smoothstep(-1.0, 1.0, inner_dist);
         // Mix border color and fill color
-        final_color = mix(v_border_color, v_fill_color, border_alpha);
+        final_color = mix(v_fill_color, v_border_color, border_alpha);
     }
     
     frag_color = final_color * smoothed_alpha;

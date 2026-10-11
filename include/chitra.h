@@ -144,10 +144,10 @@ void chitra_draw_text_vertices(int z_index, uint16_t texture_id,
 int chitra_load_font(const char* name, const char* path);
 
 /* Draw a string of text at the given position. */
-void chitra_draw_text(int z_index, int font_id, float size, float x, float y, const char* text, uint32_t color);
+void chitra_draw_text(int z_index, int font_id, float size, float wrap_width, float x, float y, const char* text, uint32_t color);
 
 /* Measure the width and line-height of a string of text. */
-void chitra_measure_text(int font_id, float size, const char* text, float* out_width, float* out_height);
+void chitra_measure_text(int font_id, float size, float wrap_width, const char* text, float* out_width, float* out_height);
 
 /* Push/pop a hardware scissor clipping region. */
 void chitra_push_clip(int x, int y, int w, int h);

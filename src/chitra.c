@@ -81,10 +81,10 @@ int chitra_load_font(const char* name, const char* path) {
     return chitra_font_get_api()->load_font(name, path);
 }
 
-void chitra_draw_text(int z_index, int font_id, float size, float x, float y, const char* text, uint32_t color) {
-    chitra_font_get_api()->push_text(z_index, font_id, size, x, y, text, color);
+void chitra_draw_text(int z_index, int font_id, float size, float wrap_width, float x, float y, const char* text, uint32_t color) {
+    chitra_font_get_api()->push_text(z_index, font_id, size, wrap_width, x, y, text, color);
 }
 
-void chitra_measure_text(int font_id, float size, const char* text, float* out_width, float* out_height) {
-    chitra_font_get_api()->measure_text(font_id, size, text, out_width, out_height);
+void chitra_measure_text(int font_id, float size, float wrap_width, const char* text, float* out_width, float* out_height) {
+    chitra_font_get_api()->measure_text(font_id, size, wrap_width, text, out_width, out_height);
 }

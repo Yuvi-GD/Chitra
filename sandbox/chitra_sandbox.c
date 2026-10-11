@@ -4,16 +4,13 @@
 
 static int s_last_w = 0;
 static int s_last_h = 0;
-
 static int s_font = -1;
 
 #include <string.h>
 
 static void on_init(void) {
     printf("Sandbox Init\n");
-    
     s_font = chitra_load_font("sans", "../../sandbox/Font/Roboto-Regular.ttf");
-    
     if (s_font == -1) {
         printf("Failed to load font!\n");
     }
@@ -45,7 +42,7 @@ static void on_frame(void) {
     
     /* Sidebar Logo Text */
     if (s_font != -1) {
-        chitra_draw_text(3, s_font, 28.0f, 30.0f, 30.0f, "Chitra Engine", 0xFFE4E4E7);
+        chitra_draw_text(3, s_font, 28.0f, 0.0f, 30.0f, 30.0f, "Chitra Engine", 0xFFE4E4E7);
     }
     
     /* Sidebar Items */
@@ -58,14 +55,14 @@ static void on_frame(void) {
         if (s_font != -1) {
             char buf[32];
             snprintf(buf, sizeof(buf), "Navigation %d", i + 1);
-            chitra_draw_text(3, s_font, 16.0f, 36.0f, y + 10.0f, buf, text_color);
+            chitra_draw_text(3, s_font, 16.0f, 0.0f, 36.0f, y + 10.0f, buf, text_color);
         }
     }
     
     /* Top Bar */
     chitra_draw_rect(1, sidebar_w, 0, w - sidebar_w, 70.0f, 0.0f, 1.0f, 0xFF18181B, 0xFF27272A);
     if (s_font != -1) {
-        chitra_draw_text(3, s_font, 28.0f, sidebar_w + 30.0f, 28.0f, "Dashboard View", 0xFFE4E4E7);
+        chitra_draw_text(3, s_font, 28.0f, 0.0f, sidebar_w + 30.0f, 28.0f, "Dashboard View", 0xFFE4E4E7);
     }
     
     /* Main Content Area Grid */
@@ -92,20 +89,19 @@ static void on_frame(void) {
         chitra_draw_rect(3, x + 16, y + 16, card_size - 32, 110.0f, 10.0f, 0.0f, 0xFFCE6A38, 0);
         
         if (s_font != -1) {
-            chitra_draw_text(4, s_font, 22.0f, x + 30, y + 80, "Modern UI", 0xFFFFFFFF);
+            chitra_draw_text(4, s_font, 22.0f, 0.0f, x + 30, y + 80, "Modern UI", 0xFFFFFFFF);
             
             char buf[32];
             snprintf(buf, sizeof(buf), "Component %d", i + 1);
-            chitra_draw_text(3, s_font, 18.0f, x + 20, y + 160.0f, buf, 0xFFE4E4E7);
-            chitra_draw_text(3, s_font, 13.0f, x + 20, y + 185.0f, "Retained mode rendering", 0xFFA1A1AA);
-            chitra_draw_text(3, s_font, 13.0f, x + 20, y + 203.0f, "Zero allocation pipeline", 0xFFA1A1AA);
+            chitra_draw_text(3, s_font, 18.0f, 0.0f, x + 20, y + 160.0f, buf, 0xFFE4E4E7);
+            chitra_draw_text(3, s_font, 13.0f, 0.0f, x + 20, y + 185.0f, "Retained mode rendering", 0xFFA1A1AA);
+            chitra_draw_text(3, s_font, 13.0f, 0.0f, x + 20, y + 203.0f, "Zero allocation pipeline", 0xFFA1A1AA);
         } else {
             /* Card Text Placeholder */
             chitra_draw_rect(3, x + 20, y + card_size - 60, card_size - 80, 15.0f, 4.0f, 0.0f, 0xFF666666, 0);
             chitra_draw_rect(3, x + 20, y + card_size - 30, card_size - 100, 15.0f, 4.0f, 0.0f, 0xFF555555, 0);
         }
     }
-    
 }
 
 int main(void) {

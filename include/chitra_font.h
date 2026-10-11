@@ -14,8 +14,8 @@ typedef struct {
     int (*load_font)(const char* name, const char* path);
     
     /* Text layout and iteration */
-    void (*push_text)(int z_index, int font_id, float size, float x, float y, const char* text, uint32_t color);
-    void (*measure_text)(int font_id, float size, const char* text, float* out_width, float* out_height);
+    void (*push_text)(int z_index, int font_id, float size, float wrap_width, float x, float y, const char* text, uint32_t color);
+    void (*measure_text)(int font_id, float size, float wrap_width, const char* text, float* out_width, float* out_height);
     
     /* Upload dirty atlas data to RHI */
     void (*prepare)(void);

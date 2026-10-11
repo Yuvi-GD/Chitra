@@ -105,80 +105,128 @@ static int font_load_font(const char* name, const char* path) {
     return fonsAddFont(s_fons, name, path);
 }
 
-static void font_push_text(int z_index, int font_id, float size, float x, float y, const char* text, uint32_t color) {
-    if (!s_fons || font_id == FONS_INVALID || !text) return;
-
-    fonsSetFont(s_fons, font_id);
-    fonsSetSize(s_fons, size);
-    fonsSetAlign(s_fons, FONS_ALIGN_LEFT | FONS_ALIGN_TOP);
-    
-    FONStextIter iter;
-    if (!fonsTextIterInit(s_fons, &iter, x, y, text, NULL)) return;
-
-    FONSquad q;
-    
-    /* Pre-allocate an array of text vertices for the whole string.
-       A rough upper bound is strlen(text) * 4 vertices. */
-    size_t len = strlen(text);
-    Chitra_TextVertex* vertices = (Chitra_TextVertex*)malloc(sizeof(Chitra_TextVertex) * len * 4);
-    int quad_count = 0;
-
-    while (fonsTextIterNext(s_fons, &iter, &q)) {
-        if (quad_count >= len) break;
-        
-        int i = quad_count * 4;
-        
-        /* 0: Top-Left */
-        vertices[i+0].pos[0] = q.x0; vertices[i+0].pos[1] = q.y0;
-        vertices[i+0].uv[0]  = q.s0; vertices[i+0].uv[1]  = q.t0;
-        vertices[i+0].color  = color;
-        
-        /* 1: Top-Right */
-        vertices[i+1].pos[0] = q.x1; vertices[i+1].pos[1] = q.y0;
-        vertices[i+1].uv[0]  = q.s1; vertices[i+1].uv[1]  = q.t0;
-        vertices[i+1].color  = color;
-        
-        /* 2: Bottom-Right */
-        vertices[i+2].pos[0] = q.x1; vertices[i+2].pos[1] = q.y1;
-        vertices[i+2].uv[0]  = q.s1; vertices[i+2].uv[1]  = q.t1;
-        vertices[i+2].color  = color;
-        
-        /* 3: Bottom-Left */
-        vertices[i+3].pos[0] = q.x0; vertices[i+3].pos[1] = q.y1;
-        vertices[i+3].uv[0]  = q.s0; vertices[i+3].uv[1]  = q.t1;
-        vertices[i+3].color  = color;
-        
-        quad_count++;
-    }
-
-    if (quad_count > 0) {
-        /* Pass the generated geometry to Chitra's Command Buffer */
-        chitra_cmd_push_text(z_index, s_atlas_texture_id, vertices, quad_count);
-    }
-
-    free(vertices);
-}
-
-static void font_measure_text(int font_id, float size, const char* text, float* out_width, float* out_height) {
+static void font_process_text(int font_id, float size, float wrap_width, float start_x, float start_y, const char* text,
+                              float* out_w, float* out_h,
+                              int z_index, uint32_t color, bool draw) {
     if (!s_fons || font_id == FONS_INVALID || !text) {
-        if (out_width) *out_width = 0;
-        if (out_height) *out_height = 0;
+        if (out_w) *out_w = 0;
+        if (out_h) *out_h = 0;
         return;
     }
 
     fonsSetFont(s_fons, font_id);
     fonsSetSize(s_fons, size);
     fonsSetAlign(s_fons, FONS_ALIGN_LEFT | FONS_ALIGN_TOP);
+
+    float ascender, descender, lineh;
+    fonsVertMetrics(s_fons, &ascender, &descender, &lineh);
+
+    float cx = start_x;
+    float cy = start_y;
+    float max_x = start_x;
+
+    const char* p = text;
+    const char* word_start = text;
     
-    float bounds[4];
-    float w = fonsTextBounds(s_fons, 0, 0, text, NULL, bounds);
-    
-    if (out_width) *out_width = w;
-    if (out_height) {
-        float ascender, descender, lineh;
-        fonsVertMetrics(s_fons, &ascender, &descender, &lineh);
-        *out_height = lineh;
+    Chitra_TextVertex* vertices = NULL;
+    int quad_count = 0;
+    size_t len = strlen(text);
+
+    if (draw) {
+        vertices = (Chitra_TextVertex*)malloc(sizeof(Chitra_TextVertex) * len * 4);
     }
+
+    while (*p) {
+        // Find next word boundary
+        while (*p && *p != ' ' && *p != '\n') p++;
+        
+        bool is_newline = (*p == '\n');
+        
+        int word_len = p - word_start;
+        if (word_len > 0) {
+            char word_buf[512];
+            int copy_len = word_len < 511 ? word_len : 511;
+            memcpy(word_buf, word_start, copy_len);
+            word_buf[copy_len] = '\0';
+            
+            float bounds[4];
+            float adv = fonsTextBounds(s_fons, cx, cy, word_buf, NULL, bounds);
+            
+            if (wrap_width > 0 && cx > start_x && ((cx + adv) - start_x) > wrap_width) {
+                // Wrap to next line BEFORE this word
+                cx = start_x;
+                cy += lineh;
+                adv = fonsTextBounds(s_fons, cx, cy, word_buf, NULL, bounds);
+            }
+            
+            if (draw && vertices) {
+                FONStextIter iter;
+                fonsTextIterInit(s_fons, &iter, cx, cy, word_buf, NULL);
+                FONSquad q;
+                
+                while (fonsTextIterNext(s_fons, &iter, &q)) {
+                    if (quad_count >= len) break;
+                    
+                    int i = quad_count * 4;
+        
+                    /* 0: Top-Left */
+                    vertices[i+0].pos[0] = q.x0; vertices[i+0].pos[1] = q.y0;
+                    vertices[i+0].uv[0]  = q.s0; vertices[i+0].uv[1]  = q.t0;
+                    vertices[i+0].color  = color;
+                    
+                    /* 1: Top-Right */
+                    vertices[i+1].pos[0] = q.x1; vertices[i+1].pos[1] = q.y0;
+                    vertices[i+1].uv[0]  = q.s1; vertices[i+1].uv[1]  = q.t0;
+                    vertices[i+1].color  = color;
+                    
+                    /* 2: Bottom-Right */
+                    vertices[i+2].pos[0] = q.x1; vertices[i+2].pos[1] = q.y1;
+                    vertices[i+2].uv[0]  = q.s1; vertices[i+2].uv[1]  = q.t1;
+                    vertices[i+2].color  = color;
+                    
+                    /* 3: Bottom-Left */
+                    vertices[i+3].pos[0] = q.x0; vertices[i+3].pos[1] = q.y1;
+                    vertices[i+3].uv[0]  = q.s0; vertices[i+3].uv[1]  = q.t1;
+                    vertices[i+3].color  = color;
+        
+                    quad_count++;
+                }
+            }
+            cx += adv;
+            if (cx > max_x) max_x = cx;
+        }
+
+        if (is_newline) {
+            cx = start_x;
+            cy += lineh;
+            p++;
+        } else if (*p == ' ') {
+            // Measure space
+            float bounds[4];
+            float space_adv = fonsTextBounds(s_fons, cx, cy, " ", NULL, bounds);
+            cx += space_adv;
+            if (cx > max_x) max_x = cx;
+            p++;
+        }
+        word_start = p;
+    }
+
+    if (draw && quad_count > 0 && vertices) {
+        chitra_cmd_push_text(z_index, s_atlas_texture_id, vertices, quad_count);
+    }
+    
+    if (vertices) free(vertices);
+
+    if (out_w) *out_w = (max_x - start_x);
+    if (out_h) *out_h = (cy - start_y) + lineh;
+}
+
+static void font_push_text(int z_index, int font_id, float size, float wrap_width, float x, float y, const char* text, uint32_t color) {
+    font_process_text(font_id, size, wrap_width, x, y, text, NULL, NULL, z_index, color, true);
+}
+
+static void font_measure_text(int font_id, float size, float wrap_width, const char* text, float* out_width, float* out_height) {
+    font_process_text(font_id, size, wrap_width, 0, 0, text, out_width, out_height, 0, 0, false);
 }
 
 static void font_prepare(void) {

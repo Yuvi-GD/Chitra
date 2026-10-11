@@ -7,4 +7,4 @@ build/
 *.dylib
 src/backends/shaders/gen/
 
-docs/
+docs/archive
