@@ -15,11 +15,11 @@ Chitra can function as the rendering engine for retained UI frameworks (such as 
 ## Features
 
 * **O(0) Static Cost:** Unchanged UI elements cost zero CPU work per frame. No recursive tree traversals and no re-rasterization.
-* **O(1) In-Place Updates:** Position, size, border radius, and color updates overwrite contiguous memory directly via stable 32-bit element IDs.
+* **O(1) In-Place Updates:** Position, size, border radius, and color updates overwrite contiguous memory directly via stable 32-bit element handles.
 * **Dynamic 2-Table Memory Architecture:** An ultra-lean 16-byte `CommandTable` (Slot Map) paired with a LIFO `free_list` recycler. Zero hardcoded limits with dynamic heap growth.
 * **Per-Pipeline Staging Arrays:** Contiguous, cache-friendly vertex buffers per shader pipeline (40-byte Shape SDF, 20-byte Text/Texture, 20-byte Mesh).
 * **32-Bit Index Buffer Hole-Skipping:** Dynamic text updates and element removals leave dead memory holes in RAM/VRAM that are naturally bypassed by the GPU index stream, completely eliminating expensive per-frame memory shifting (`memmove`).
-* **Microsecond 64-Bit Radix Sorting:** Coalesces draw calls and minimizes GPU state transitions using a compact 64-bit sort key `[ Z-Index | Scissor | Pipeline | Texture | Command ID ]`.
+* **Microsecond 64-Bit Radix Sorting:** Coalesces draw calls and minimizes GPU state transitions using a 64-bit visual sort key `[ Draw Order (30b) | Clip ID (16b) | Pipeline ID (5b) | Texture ID (13b) ]` paired with decoupled 32-bit handles via 16-byte SortEntry structs.
 * **Hardware Fixed-Function Scissoring:** Direct GPU hardware scissor registers instead of expensive fragment shader discards.
 * **Pluggable and Modular Architecture:**
   * **Graphics RHI:** Sokol GFX (Direct3D 11, Metal, WebGPU, OpenGL) today, with future support for SDL_GPU (Direct3D 12, Metal, Vulkan).
@@ -34,8 +34,8 @@ Chitra can function as the rendering engine for retained UI frameworks (such as 
 ```
 +------------------------------------------------------------------------+
 |                   Layer 3: Client Application                          |
-|  - UI Framework (e.g., Tether), Game Engine, or Standalone Tool        |
-|  - Manages UI logic, layouts, events, and holds 32-bit Element IDs     |
+|  - UI Framework, Game Engine, or Standalone Desktop App                |
+|  - Manages UI logic, layouts, events, and holds 32-bit Element Handles  |
 +-----------------------------------+-+----------------------------------+
                                     |
 +-----------------------------------v------------------------------------+
@@ -101,43 +101,44 @@ The compiled binaries will be located in `build/` (or `build/Release/` on Window
 
 ## Quick Start Example
 
-Here is a minimal standalone example showing how to initialize Chitra, create retained UI elements, perform in-place updates, and render:
+Here is a minimal standalone example showing how to initialize Chitra, create retained UI elements via the reservation-first handle pattern, perform in-place updates, and render:
 
 ```c
 #include "chitra.h"
 
 int main(void) {
-    // 1. Initialize Chitra with viewport size
+    // 1. Initialize Chitra embedded engine
     chitra_init(1280, 720);
 
-    // 2. Register a scissor clip region (optional, 0 = full window)
-    uint8_t clip_id = chitra_register_clip(0, 0, 1280, 720);
+    // 2. Register a scissor clip region (0 = default full viewport)
+    uint16_t clip_id = chitra_register_clip(0, 0, 1280, 720);
 
-    // 3. Create retained elements
-    uint32_t panel_id = chitra_create_rect(
-        100.0f, 100.0f, 400.0f, 300.0f, // X, Y, Width, Height
-        12.0f, 2.0f,                    // Corner Radius, Border Width
-        0xFF2A2D34, 0xFF4F5D75,         // Fill Color, Border Color (RGBA)
-        10, clip_id                     // Z-Index, Clip ID
-    );
+    // 3. Create retained elements via reservation-first pattern
+    uint32_t panel = chitra_create(CHITRA_PIPELINE_SHAPE);
+    chitra_rect_set_bounds(panel, 100.0f, 100.0f, 400.0f, 300.0f);
+    chitra_rect_set_radius(panel, 12.0f);
+    chitra_rect_set_border(panel, 2.0f);
+    chitra_rect_set_color(panel, 0xFF2A2D34, 0xFF4F5D75);
+    chitra_set_draw_order(panel, 10);
+    chitra_set_clip(panel, clip_id);
 
-    uint32_t text_id = chitra_create_text(
-        "Hello Chitra!",
-        120.0f, 130.0f, 24.0f, 360.0f,  // X, Y, Font Size, Wrap Width
-        0xFFFFFFFF,                     // Text Color
-        20, clip_id                     // Z-Index, Clip ID
-    );
+    uint32_t text = chitra_create(CHITRA_PIPELINE_TEXT);
+    chitra_text_set_content(text, "Hello Chitra!");
+    chitra_text_set_bounds(text, 120.0f, 130.0f);
+    chitra_text_set_color(text, 0xFFFFFFFF);
+    chitra_set_draw_order(text, 20);
+    chitra_set_clip(text, clip_id);
 
     // 4. Update elements in place when dirty (O(1) memory write)
-    chitra_update_rect(panel_id, 100.0f, 100.0f, 450.0f, 300.0f, 12.0f, 2.0f, 0xFF2A2D34, 0xFF4F5D75);
+    chitra_rect_set_bounds(panel, 100.0f, 100.0f, 450.0f, 300.0f);
 
     // 5. Frame render callback
     chitra_begin_frame(1280, 720, 1.0f);
-    chitra_render(); // Radix sort, index generation, batch coalescing, GPU draw
+    chitra_render(); // Radix sort, index stream generation, batch coalescing, GPU draw
     chitra_end_frame();
 
     // 6. Cleanup on exit
-    chitra_shutdown();
+    chitra_cleanup();
     return 0;
 }
 ```
