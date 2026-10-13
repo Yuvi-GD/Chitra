@@ -40,6 +40,7 @@ set(GEN_DIR "${SHADER_DIR}/gen")
 set(SHADER_FILES
     "chitra_shape.glsl"
     "chitra_text.glsl"
+    "chitra_texture.glsl"
 )
 
 set(GENERATED_HEADERS "")
@@ -66,9 +67,12 @@ add_custom_target(chitra_shaders DEPENDS ${GENERATED_HEADERS})
 # ==============================================================================
 add_library(chitra STATIC
     src/chitra.c
-    src/chitra_arena.c
-    src/chitra_cmd.c
+    src/chitra_table.c
+    src/chitra_shape.c
+    src/chitra_texture.c
     src/chitra_font.c
+    src/chitra_batch.c
+    src/chitra_clip.c
     src/backends/sokol_hal.c
     src/backends/sokol_rhi.c
     src/backends/sokol_impl.c

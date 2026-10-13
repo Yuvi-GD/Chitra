@@ -3,7 +3,7 @@
 #include "sokol_log.h"
 #include "chitra_hal.h"
 #include "chitra_rhi.h"
-#include "chitra_cmd.h"
+#include "chitra_table.h"
 #include "sokol_time.h"
 #include <stdio.h>
 
@@ -36,6 +36,7 @@ static HANDLE s_waitable_timer = NULL;
 extern void chitra_internal_init(void);
 extern void chitra_internal_prepare(void);
 extern void chitra_internal_term(void);
+extern void chitra_render(void);
 
 /* -------------------------------------------------------------------------
  * chitra_sleep_ms
@@ -117,7 +118,7 @@ static void sokol_init(void) {
     }
 #endif
 
-    chitra_rhi_get_api()->init();
+    chitra_rhi_get_api()->init(&s_config);
     chitra_internal_init();
     if (s_config.on_init) s_config.on_init();
 }
@@ -129,7 +130,7 @@ static void sokol_frame(void) {
 
     /* Detect resize and mark dirty */
     if (w != s_last_w || h != s_last_h) {
-        chitra_cmd_set_dirty();
+        chitra_table_mark_dirty();
         s_last_w = w;
         s_last_h = h;
     }
@@ -137,16 +138,15 @@ static void sokol_frame(void) {
     /* Let the app update its command list */
     if (s_config.on_frame) s_config.on_frame();
 
-    /* If commands changed, re-prepare batches and schedule 3 draw frames.
-     * Triple-buffering: GPU may still be reading the previous 2 frames. */
-    if (chitra_cmd_is_dirty()) {
-        chitra_internal_prepare();
+    /* If commands changed, schedule 3 draw frames for triple-buffering presentation. */
+    if (chitra_table_is_dirty()) {
         s_dirty_countdown = 3;
     }
 
     if (s_dirty_countdown > 0) {
+        chitra_internal_prepare();
         chitra_rhi_get_api()->begin_frame(w, h);
-        chitra_cmd_draw();
+        chitra_render();
         chitra_rhi_get_api()->end_frame();
         s_dirty_countdown--;
     } else {
@@ -180,7 +180,7 @@ static void sokol_cleanup(void) {
 
 static void sokol_event(const sapp_event* e) {
     if (e->type == SAPP_EVENTTYPE_RESIZED) {
-        chitra_cmd_set_dirty();
+        chitra_table_mark_dirty();
         s_dirty_countdown = 3;
     }
     

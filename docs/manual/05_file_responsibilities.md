@@ -16,14 +16,20 @@ third_party/chitra/
 │   ├── chitra.h                   # Public client API (consumed by client UI frameworks)
 │   ├── chitra_hal.h               # Hardware Abstraction Layer (HAL) interface contract
 │   ├── chitra_rhi.h               # Render Hardware Interface (RHI) contract
-│   ├── chitra_font.h              # Typography subsystem interface contract
-│   ├── chitra_cmd.h               # Internal command buffer and batching interface
-│   └── chitra_arena.h             # Dynamic memory arena utilities
+│   ├── chitra_table.h             # Slot table and handle kernel interface contract
+│   ├── chitra_shape.h             # Dedicated Shape pipeline interface contract
+│   ├── chitra_texture.h           # Dedicated Texture pipeline interface contract
+│   ├── chitra_font.h              # Dedicated Typography pipeline interface contract
+│   ├── chitra_batch.h             # 16-byte SortEntry, LSD Radix Sort, and batching contract
+│   └── chitra_clip.h              # Dynamic scissor registry and coordinate mapping
 ├── src/                           # Core engine implementation
-│   ├── chitra.c                   # Engine initialization, lifecycle, and API router
-│   ├── chitra_cmd.c               # Command buffer, Radix Sort, 32-bit index generation
-│   ├── chitra_font.c              # Typography implementation and font atlas management
-│   ├── chitra_arena.c             # Bump-allocation arena implementation
+│   ├── chitra.c                   # Engine coordinator, frame hooks, and public API router
+│   ├── chitra_table.c             # Slot table kernel, LIFO free_list recycler, and alive state
+│   ├── chitra_shape.c             # Dedicated Shape pipeline: SDF staging quads & in-place setters
+│   ├── chitra_texture.c           # Dedicated Texture pipeline: image quads & UV mapping
+│   ├── chitra_font.c              # Dedicated Typography pipeline: FontStash TTF & text quads
+│   ├── chitra_batch.c             # 8-pass LSD Radix Sort, 32-bit index streaming, batch coalescing
+│   ├── chitra_clip.c              # Dynamic clip table with recycler stack and scissor mapping
 │   └── backends/                  # Modular platform and graphics backends
 │       ├── sokol_hal.c            # Sokol App windowing and event dispatch backend
 │       ├── sokol_rhi.c            # Sokol GFX hardware rasterization backend
@@ -115,13 +121,25 @@ Headers located in `include/` define the API contracts across the system. They c
   ```
 * **Responsibility:** Enables typography engines to be swapped cleanly. Chitra currently provides a FontStash backend and can seamlessly transition to a FreeType + HarfBuzz backend without modifying core command queues or batching pipelines.
 
-### E. [include/chitra_cmd.h](../../include/chitra_cmd.h)
-* **Role:** Internal interface for the engine command buffer and batching pipeline. Opaque to client applications.
-* **Responsibility:** Exposes internal lifecycle functions (`chitra_cmd_init`, `chitra_cmd_clear`, `chitra_cmd_prepare`, `chitra_cmd_draw`), clip stack queries, and accessors for raw vertex buffers used during GPU uploads.
+### E. [include/chitra_table.h](../../include/chitra_table.h)
+* **Role:** Internal interface for the slot table kernel, LIFO handle recycling, and alive state tracking.
+* **Responsibility:** Declares `Chitra_CommandSlot` (16 bytes), `Chitra_CommandTable`, `Chitra_FreeList`, slot accessors, and sort key visual state setters.
 
-### F. [include/chitra_arena.h](../../include/chitra_arena.h)
-* **Role:** Dynamic memory arena structure and memory utility functions.
-* **Responsibility:** Provides sub-microsecond bump allocation (`chitra_arena_push`) and instant memory clearing (`chitra_arena_clear`) for frame-lifetime data.
+### F. [include/chitra_shape.h](../../include/chitra_shape.h)
+* **Role:** Internal interface for the dedicated Shape pipeline.
+* **Responsibility:** Declares Shape quad allocation, staging buffer access, and compaction for SDF rounded boxes, borders, and pills.
+
+### G. [include/chitra_texture.h](../../include/chitra_texture.h)
+* **Role:** Internal interface for the dedicated Texture pipeline.
+* **Responsibility:** Declares Texture quad allocation, staging buffer access, and sprite UV setters.
+
+### H. [include/chitra_batch.h](../../include/chitra_batch.h)
+* **Role:** Internal interface for sorting, 32-bit index streaming, and batch coalescing.
+* **Responsibility:** Declares `Chitra_SortEntry` (16 bytes), the 8-pass LSD Radix Sort pipeline, hole-skipping index stream generation, and `Chitra_DrawBatch`.
+
+### I. [include/chitra_clip.h](../../include/chitra_clip.h)
+* **Role:** Internal interface for dynamic scissor clipping and high-DPI coordinate mapping.
+* **Responsibility:** Declares dynamic `clip_table` with recycler stack, nested scissor intersection math, and physical pixel scaling.
 
 ---
 
@@ -133,33 +151,55 @@ The files in `src/` contain the platform-independent core logic of Chitra. They 
 * **Module:** Engine Coordinator & Public Router
 * **Responsibilities:**
   1. **Backend Discovery:** Retrieves registered vtables via `chitra_hal_get_api()` and `chitra_rhi_get_api()`.
-  2. **Application Lifecycle:** Coordinates engine startup via `chitra_run()`, delegating the event loop to the registered HAL.
+  2. **Application Lifecycle:** Coordinates engine startup via `chitra_run()` or embedded `chitra_init()` / `chitra_render()`.
   3. **Internal Synchronization:** Exposes `chitra_internal_init()`, `chitra_internal_prepare()`, and `chitra_internal_term()` invoked by HAL frame hooks.
-  4. **API Routing:** Forwards high-level drawing calls (`chitra_draw_rect`, `chitra_draw_text`) to internal subsystems (`chitra_cmd` and `chitra_font`).
+  4. **API Routing:** Forwards high-level calls to internal subsystems (`chitra_table`, `chitra_shape`, `chitra_texture`, `chitra_font`, `chitra_batch`, `chitra_clip`).
 
-### B. [src/chitra_cmd.c](../../src/chitra_cmd.c)
-* **Module:** Command Processing, Sorting, and Batching
+### B. [src/chitra_table.c](../../src/chitra_table.c)
+* **Module:** Slot Table Kernel & Handle Lifecycle
 * **Responsibilities:**
-  1. **Dynamic Memory Model:** Owns the `CommandTable` and `free_list` metadata structures and per-pipeline vertex staging buffers.
-  2. **Memory Hole Skipping:** Preserves dead memory holes on text append or element resize, emitting index buffer streams that completely bypass dead memory.
-  3. **64-Bit Radix Sorting:** Constructs 64-bit integer sort keys (`[ Draw Order (30) | Clip ID (16) | Pipeline ID (5) | Texture ID (13) ]`) paired with `command_id` inside 16-byte `Chitra_SortEntry` structures.
-  4. **State Coalescing:** Evaluates the 34-bit state bitmask (`0x00000003FFFFFFFF`) to merge compatible draw calls across differing visual layers into the minimum theoretical number of GPU draw calls.
-  5. **Clip Hierarchy Table:** Manages the clip stack, calculating geometric intersections for nested scissor regions and emitting unique 16-bit `Clip ID`s.
+  1. **Command Table:** Owns the `Chitra_CommandSlot` table and explicit boolean alive tracking array.
+  2. **LIFO Recycler:** Owns `Chitra_FreeList` for recycling destroyed handles in $O(1)$.
+  3. **Delegated Allocation:** Directs `chitra_create()` to dedicated pipeline allocators (`chitra_shape_alloc`, `chitra_texture_alloc`).
+  4. **State Modifiers:** Mutates visual sort keys (Draw Order, Clip, Texture ID) in RAM.
 
-### C. [src/chitra_font.c](../../src/chitra_font.c)
-* **Module:** Typography and Font Atlas Management
+### C. [src/chitra_shape.c](../../src/chitra_shape.c)
+* **Module:** Dedicated Shape Pipeline
 * **Responsibilities:**
-  1. **Font Loading:** Loads TTF fonts from local disk files or memory buffers into FontStash contexts.
-  2. **Single-Upload Atlas Synchronization:** Implements custom FontStash callback vtables (`fons_render_create`, `fons_render_update`, `fons_render_draw`). Dirty atlas regions accumulate during text layout and are uploaded to GPU VRAM once per frame in `chitra_font_prepare()`.
-  3. **Text Glyph Quad Generation:** Uses `fonsTextIter` to iterate glyph metrics and coordinates, emitting 20-byte `Chitra_TextVertex` quads into the text staging buffer.
-  4. **Decoupled Text Measurement:** Implements `chitra_measure_text()` using font advance metrics without pushing quads into the frame command queue.
+  1. **Staging Buffer:** Owns `s_shape_pipe` (40-byte `Chitra_ShapeVertex` staging array).
+  2. **Immediate Quad Allocation:** Reserves 4 vertices once on shape creation.
+  3. **Unconditional $O(1)$ Setters:** Implements `chitra_rect_set_bounds()`, `chitra_rect_set_radius()`, `chitra_rect_set_border()`, `chitra_rect_set_fill_color()`, and `chitra_rect_set_border_color()` as pure, direct RAM overwrites with zero cursor manipulation.
+  4. **Compaction:** Compacts dead shape quads during idle frames.
 
-### D. [src/chitra_arena.c](../../src/chitra_arena.c)
-* **Module:** Dynamic Memory Bump Allocator
+### D. [src/chitra_texture.c](../../src/chitra_texture.c)
+* **Module:** Dedicated Texture Pipeline
 * **Responsibilities:**
-  1. **Fast Allocation:** Provides $O(1)$ pointer increments for memory pushes.
-  2. **Capacity Growth:** Automatically reallocates underlying buffers using geometric expansion when initial capacities are exceeded.
-  3. **Zero Heap Overhead:** Allows clearing thousands of allocations instantly by setting `arena->size = 0` without invoking `free()`.
+  1. **Staging Buffer:** Owns `s_texture_pipe` (20-byte `Chitra_TextVertex` staging array).
+  2. **Quad Allocation:** Reserves 4 textured quad vertices on creation.
+  3. **Setters:** Implements `chitra_texture_set_bounds()`, `chitra_texture_set_uv()`, and `chitra_texture_set_color()`.
+
+### E. [src/chitra_font.c](../../src/chitra_font.c)
+* **Module:** Dedicated Typography Pipeline
+* **Responsibilities:**
+  1. **Staging Buffer:** Owns `s_text_pipe` (20-byte `Chitra_TextVertex` staging array).
+  2. **Dynamic Quads:** Resizes quads in-place or appends at cursor when text length changes.
+  3. **Font Loading & Atlas Sync:** Loads TTF fonts into FontStash contexts and synchronizes dynamic atlas textures to GPU VRAM once per frame.
+  4. **Decoupled Metrics:** Computes pure CPU text measurements (`chitra_measure_text()`, font metrics) with zero vertex allocation.
+
+### F. [src/chitra_batch.c](../../src/chitra_batch.c)
+* **Module:** LSD Radix Sorter & 32-Bit Index Stream Engine
+* **Responsibilities:**
+  1. **Active Slot Scanning:** Collects alive elements (`vertex_count > 0`) into cache-line aligned 16-byte `Chitra_SortEntry` structs.
+  2. **8-Pass LSD Radix Sort:** Orders active elements across 64-bit integer keys in microseconds without pointer dereferences.
+  3. **32-Bit Index Buffer Hole Skipping:** Emits 32-bit indices directly from `start_vertex_index`, leaping over dead memory holes with zero GPU penalty.
+  4. **34-Bit State Coalescing:** Evaluates `key & 0x00000003FFFFFFFFULL` to merge compatible quads across differing Draw Orders into unified GPU draw calls.
+
+### G. [src/chitra_clip.c](../../src/chitra_clip.c)
+* **Module:** Dynamic Scissor Registry
+* **Responsibilities:**
+  1. **Dynamic Allocation & Recycling:** Starts at 16 clip regions, grows 1.5x on demand, and recycles destroyed clip IDs via `s_clip_free_list`.
+  2. **Nested Intersections:** Computes geometric intersections for parent/child clipping hierarchies.
+  3. **High-DPI Translation:** Converts logical screen coordinates to physical framebuffer pixels.
 
 ---
 
@@ -279,7 +319,7 @@ Maintainers and AI coding assistants must adhere to the following code placement
    * Files in `include/` must **never** include backend headers (`sokol_gfx.h`, `windows.h`, `d3d11.h`, etc.).
    * Client applications that include `<chitra.h>` must never be exposed to backend-specific definitions.
 2. **Backend Modularity Rule:**
-   * Core engine files (`chitra_cmd.c`, `chitra_font.c`, `chitra_arena.c`) must **never** call graphics API functions directly. All GPU interactions must route through the `Chitra_RHI_API` vtable.
+   * Core engine files (`chitra_table.c`, `chitra_shape.c`, `chitra_texture.c`, `chitra_font.c`, `chitra_batch.c`, `chitra_clip.c`) must **never** call graphics API functions directly. All GPU interactions must route through the `Chitra_RHI_API` vtable.
    * Core engine files must **never** call OS windowing APIs directly. All platform interactions must route through the `Chitra_HAL_API` vtable.
 3. **Allocation Rule:**
    * No dynamic memory allocations (`malloc`, `realloc`, `calloc`) are permitted during steady-state idle frames.

@@ -150,7 +150,7 @@ sequenceDiagram
     Font-->>Client: Return bounding width & height (Zero vertices, Zero GPU calls)
 
     Note over Client,Staging: Phase 2: Retained Handle Configuration
-    Client->>Font: chitra_text_set_content(handle, text)
+    Client->>Font: chitra_text_set(handle, font, size, text, x, y)
     Font->>Atlas: Check glyph coverage in atlas cache
     opt Missing Glyphs in Atlas
         Font->>Atlas: Rasterize TrueType glyphs into CPU atlas bitmap

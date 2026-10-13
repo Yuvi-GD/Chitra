@@ -47,7 +47,7 @@ Chitra eliminates parallel tracking lists, active/inactive bitsets, and dirty ar
 typedef struct {
     uint64_t sort_key;           // 8 bytes: Pre-compiled 64-bit Radix Sort key
     uint32_t start_vertex_index; // 4 bytes: Pipeline-local vertex offset in staging array
-    uint32_t vertex_count;       // 4 bytes: Number of vertices (0 = DEAD / EMPTY SLOT)
+    uint32_t vertex_meta;        // 4 bytes: [Bit 31: Alive Flag | Bits 0..30: Vertex Count]
 } Chitra_CommandSlot; // Exactly 16 bytes! Four slots fit in a 64-byte cache line.
 
 typedef struct {
@@ -70,8 +70,8 @@ Chitra_FreeList     free_list;
 Every active or inactive element in Chitra is represented in RAM by a single `Chitra_CommandSlot`:
 * **`sort_key` (8 bytes):** Stores the fully assembled 64-bit integer Radix Sort key representing pure visual GPU state (30-bit Draw Order, 16-bit Clip ID, 5-bit Pipeline ID, 13-bit Texture ID). It is computed once when the element is created or when its layer/clip changes. The render loop copies this key directly without performing bitwise math on every frame.
 * **`start_vertex_index` (4 bytes):** The pipeline-local vertex index where the element's geometry begins in its respective staging buffer.
-* **`vertex_count` (4 bytes):** The number of vertices belonging to this element (e.g., 4 for a single quad, or $4 \times N$ for an $N$-character text block).
-  * **Active vs. Dead State:** If `vertex_count > 0`, the slot is **alive**. If `vertex_count == 0`, the slot is **dead / recycled**.
+* **`vertex_meta` (4 bytes):** Combined 32-bit field where Bit 31 represents the **Alive Flag** (`0x80000000U`) and Bits 0..30 represent the **Vertex Count** (supporting up to 2,147,483,647 vertices per element).
+  * **Active vs. Dead State:** If bit 31 is set (`chitra_slot_is_alive(slot)`), the slot is **alive**. When destroyed or empty (`vertex_meta == 0`), the slot is **dead / recycled**. Helper accessors `chitra_slot_is_alive()` and `chitra_slot_vertex_count()` provide zero-cost bitfield extraction.
 
 ### The 16-Byte Sorter Struct: Chitra_SortEntry
 During the active frame sorting pass, Chitra decouples the `command_id` from the 64-bit `sort_key`. This grants the sort key 30 full bits for Draw Order (~1.07 billion layers, perfectly matching the 32-bit Index Buffer capacity) instead of constraining it to 16 bits (65,535 layers).

@@ -60,6 +60,10 @@ typedef struct {
     void (*on_frame)(void);             // Called once per frame when the engine renders
     void (*on_event)(const Chitra_InputEvent* event); // Called when an OS event occurs
     void (*on_cleanup)(void);           // Called before shutdown to free client state
+
+    // Optional GPU & engine resource budget overrides (0 = compact defaults)
+    int uniform_buffer_size;            // Uniform ring buffer size in bytes (default: 128 KB)
+    int max_buffers;                    // Max active GPU buffers (default: 32)
 } Chitra_Config;
 
 /* Starts the engine, creates the window, and runs the platform event loop */
@@ -187,44 +191,34 @@ Operates on 20-byte `Chitra_TextVertex` quads. The renderer manages font glyph q
 int chitra_load_font(const char* name, const char* file_path);
 ```
 
-#### 2. Text Configuration Setters
+#### 2. Text Configuration & Generation Setters
 ```c
-/* Sets font family and font point size */
-void chitra_text_set_font(uint32_t handle, int font_id, float size);
+/* Generates natural unwrapped glyph quads directly into staging memory. Color defaults to white (0xFFFFFFFF). String is discarded immediately. */
+bool chitra_text_set(uint32_t handle, int font_id, float size, const char* text, float x, float y);
 
-/* Sets baseline top-left starting position in logical points */
-void chitra_text_set_pos(uint32_t handle, float x, float y);
+/* Generates multi-line wrapped glyph quads constrained by max_width. Color defaults to white (0xFFFFFFFF). String is discarded immediately. */
+bool chitra_text_set_wrapped(uint32_t handle, int font_id, float size, const char* text, float max_width, float x, float y);
 
-/* Updates text string: overwrites in-place if length <= capacity; appends with hole if growing */
-void chitra_text_set_content(uint32_t handle, const char* text);
+/* In-place vertex color update: overwrites 4-byte RGBA color on all quad vertices. O(1) in RAM. */
+bool chitra_text_set_color(uint32_t handle, uint32_t color);
 
-/* Sets packed RGBA8 tint color */
-void chitra_text_set_color(uint32_t handle, uint32_t color);
+/* In-place vertex translation: offsets all existing glyph vertices to new (x, y) coordinates. O(1) in RAM. */
+bool chitra_text_set_pos(uint32_t handle, float x, float y);
 
-/* Sets additional horizontal tracking space between characters in pixels */
-void chitra_text_set_letter_spacing(uint32_t handle, float spacing_px);
-
-/* Word-wrapping: Renderer calculates line breaks within max_width and updates glyph quads */
-void chitra_text_set_wrap(uint32_t handle, float max_width);
+/* In-place vertex tracking: shifts glyph quads horizontally by extra tracking spacing. O(1) in RAM. */
+bool chitra_text_set_letter_spacing(uint32_t handle, float spacing_px);
 ```
 
 #### 3. Text Layout Queries & Interactive Metrics
 ```c
-/* Queries the calculated bounding box of this text element after wrapping */
-void chitra_text_get_bounds(uint32_t handle, float* out_width, float* out_height);
+/* Direct vertex read: calculates exact bounding box (w, h) from existing quad coordinates. O(1) in RAM. */
+bool chitra_text_get_bounds(uint32_t handle, float* out_width, float* out_height);
 
-/* Hit-testing: Returns character byte index under coordinate (essential for mouse click cursor) */
-int  chitra_text_hit_test(uint32_t handle, float local_x, float local_y);
+/* Static CPU measurement without allocating a handle (used during layout solve before creating elements) */
+void chitra_measure_text(int font_id, float size, const char* text, float* out_width, float* out_height);
 
-/* Caret positioning: Returns local (X, Y) pixel coordinate of character index */
-void chitra_text_get_char_pos(uint32_t handle, int char_index, float* out_x, float* out_y);
-
-/* Static CPU measurement without allocating a handle (used during layout solve) */
-void chitra_measure_text(int font_id, float size, float letter_spacing, 
-                         const char* text, float* out_width, float* out_height);
-
-void chitra_measure_text_wrap(int font_id, float size, float letter_spacing, float max_width,
-                              const char* text, float* out_width, float* out_height, int* out_line_count);
+/* Static multi-line wrapped measurement constrained by max_width without allocating vertices */
+void chitra_measure_text_wrapped(int font_id, float size, const char* text, float max_width, float* out_width, float* out_height);
 
 /* Font vertical metrics for baseline alignment and layout calculations */
 void chitra_get_font_metrics(int font_id, float size, 
@@ -445,9 +439,7 @@ static void client_init(void) {
 
     // Configure Header Title
     chitra_set_draw_order(g_title_handle, 20);
-    chitra_text_set_font(g_title_handle, g_font_id, 24.0f);
-    chitra_text_set_pos(g_title_handle, 70, 70);
-    chitra_text_set_content(g_title_handle, "Chitra Engine Retained UI");
+    chitra_text_set(g_title_handle, g_font_id, 24.0f, "Chitra Engine Retained UI", 70, 70);
     chitra_text_set_color(g_title_handle, 0xFFFFFFFF);
 
     // Configure Interactive Button
@@ -459,20 +451,16 @@ static void client_init(void) {
 
     // Configure Button Label
     chitra_set_draw_order(g_label_handle, 40);
-    chitra_text_set_font(g_label_handle, g_font_id, 15.0f);
-    chitra_text_set_pos(g_label_handle, 110, 144);
-    chitra_text_set_content(g_label_handle, "Clicks: 0");
+    chitra_text_set(g_label_handle, g_font_id, 15.0f, "Clicks: 0", 110, 144);
     chitra_text_set_color(g_label_handle, 0xFFCDD6F4);
 
     // Configure Multi-Line Wrapped Description
     chitra_set_draw_order(g_desc_handle, 20);
-    chitra_text_set_font(g_desc_handle, g_font_id, 14.0f);
-    chitra_text_set_pos(g_desc_handle, 70, 210);
-    chitra_text_set_content(g_desc_handle, 
+    chitra_text_set_wrapped(g_desc_handle, g_font_id, 14.0f, 
         "This text element demonstrates automatic word wrapping handled natively by the Chitra "
-        "text pipeline. Each line is converted into contiguous quad streams in system RAM.");
+        "text pipeline. Each line is converted into contiguous quad streams in system RAM.",
+        660.0f, 70, 210);
     chitra_text_set_color(g_desc_handle, 0xFFA6ADC8);
-    chitra_text_set_wrap(g_desc_handle, 660.0f); // Max wrapping width
 
     // Initial frame presentation
     chitra_mark_dirty();
@@ -505,8 +493,9 @@ static void client_event(const Chitra_InputEvent* event) {
             char buf[32];
             snprintf(buf, sizeof(buf), "Clicks: %d", g_click_count);
 
-            // In-place text content update (preserves existing memory slot)
-            chitra_text_set_content(g_label_handle, buf);
+            // In-place text content update (regenerates quads into slot, drops string)
+            chitra_text_set(g_label_handle, g_font_id, 15.0f, buf, 110, 144);
+            chitra_text_set_color(g_label_handle, 0xFFCDD6F4);
             chitra_mark_dirty();
         }
     }
