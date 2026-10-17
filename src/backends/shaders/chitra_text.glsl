@@ -36,4 +36,19 @@ void main() {
 }
 @end
 
+@fs fs_texture
+layout(binding=0) uniform texture2D tex;
+layout(binding=0) uniform sampler smp;
+
+in vec2 v_uv;
+in vec4 v_color;
+
+out vec4 frag_color;
+
+void main() {
+    frag_color = v_color * texture(sampler2D(tex, smp), v_uv);
+}
+@end
+
 @program text vs_text fs_text
+@program texture vs_text fs_texture

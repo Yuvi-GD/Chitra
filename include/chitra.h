@@ -93,10 +93,6 @@ typedef struct Chitra_Config {
     void        (*on_frame)(void);
     void        (*on_event)(const Chitra_InputEvent* event);
     void        (*on_cleanup)(void);
-
-    /* Optional Engine & GPU Resource Budget Overrides (0 = compact defaults) */
-    int         uniform_buffer_size; /* 0 = default 128KB */
-    int         max_buffers;         /* 0 = default 32 */
 } Chitra_Config;
 
 /* Standalone execution loop */
@@ -134,9 +130,59 @@ uint16_t chitra_create_texture_rgba(int width, int height);
 void     chitra_update_texture_rgba(uint16_t id, const void* pixels, int width, int height);
 void     chitra_destroy_texture(uint16_t id);
 
+bool     chitra_texture_load(uint32_t handle, int width, int height, const void* rgba_pixels);
+bool     chitra_texture_load_file(uint32_t handle, const char* file_path);
+bool     chitra_texture_set_src_rect(uint32_t handle, float src_x, float src_y, float src_w, float src_h, float img_w, float img_h);
 bool     chitra_texture_set_bounds(uint32_t handle, float x, float y, float w, float h);
+bool     chitra_texture_get_bounds(uint32_t handle, float* out_w, float* out_h);
 bool     chitra_texture_set_uv(uint32_t handle, float u0, float v0, float u1, float v1);
 bool     chitra_texture_set_color(uint32_t handle, uint32_t tint_color);
+
+/* =========================================================================
+ * Runtime Inspection Getters (Introspection & Debugging Only)
+ * ========================================================================= */
+
+/**
+ * @brief Returns the internal GPU texture ID currently assigned to this element.
+ * 
+ * @warning FOR RUNTIME INTROSPECTION / DEBUG ONLY. DO NOT STORE OR CACHE!
+ * Internal GPU texture IDs are ephemeral and volatile. They may change dynamically across frames 
+ * during atlas defragmentation, compaction, repacking, or batch optimization.
+ * 
+ * @param handle Command element handle.
+ * @return uint16_t Internal GPU texture ID, or 0 if element is invalid or unassigned.
+ */
+uint16_t chitra_get_texture_id(uint32_t handle);
+
+/**
+ * @brief Returns the scissor clip ID currently assigned to this element.
+ * 
+ * @warning FOR RUNTIME INTROSPECTION / DEBUG ONLY. DO NOT STORE OR CACHE!
+ * Clip IDs may change dynamically if clips are updated or recycled.
+ * 
+ * @param handle Command element handle.
+ * @return uint16_t Internal clip ID, or 0 if default unclipped full-screen viewport.
+ */
+uint16_t chitra_get_clip_id(uint32_t handle);
+
+/**
+ * @brief Returns the pipeline type ID currently assigned to this element.
+ * 
+ * @param handle Command element handle.
+ * @return uint8_t Pipeline ID (e.g. CHITRA_PIPELINE_SHAPE, CHITRA_PIPELINE_TEXT, CHITRA_PIPELINE_TEXTURE).
+ */
+uint8_t  chitra_get_pipeline_id(uint32_t handle);
+
+/**
+ * @brief Returns the visual draw order / z-index currently assigned to this element.
+ * 
+ * @param handle Command element handle.
+ * @return uint32_t Visual draw order (0..1073741823).
+ */
+uint32_t chitra_get_draw_order(uint32_t handle);
+uint32_t chitra_texture_get_ref_count(uint16_t tex_id);
+uint32_t chitra_texture_get_allocated_area(uint16_t tex_id);
+uint32_t chitra_texture_get_dead_area(uint16_t tex_id);
 
 /* =========================================================================
  * Shape Primitive Setters (O(1) Direct RAM Writes)

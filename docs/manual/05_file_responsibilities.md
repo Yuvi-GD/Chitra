@@ -88,21 +88,26 @@ Headers located in `include/` define the API contracts across the system. They c
 * **Interface Definition:**
   ```c
   typedef struct {
-      void (*init)(void);
+      void (*init)(const struct Chitra_Config* config);
       void (*begin_frame)(int width, int height);
-      void (*upload_vertices)(const void* shape_data, size_t shape_size,
-                              const void* text_data, size_t text_size,
-                              const uint16_t* index_data, size_t index_size);
+      void (*upload_vertices)(uint8_t pipeline, const void* data, size_t size);
+      void (*upload_indices)(const uint32_t* index_data, size_t index_size);
       void (*set_scissor)(int x, int y, int w, int h);
       void (*draw_batch)(const Chitra_DrawBatch* batch);
       uint16_t (*create_texture)(int width, int height);
-      void (*update_texture)(uint16_t id, const unsigned char* data, int width, int height);
-      void (*destroy_texture)(uint16_t id);
+      void     (*update_texture)(uint16_t id, const unsigned char* data, int width, int height);
+      uint16_t (*create_texture_rgba)(int width, int height);
+      void     (*update_texture_rgba)(uint16_t id, const void* data, int width, int height);
+      void     (*update_texture_sub_rgba)(uint16_t id, int dst_x, int dst_y, int w, int h, const void* data);
+      void     (*destroy_texture)(uint16_t id);
       void (*end_frame)(void);
       void (*cleanup)(void);
   } Chitra_RHI_API;
+
+  void chitra_rhi_set_api(const Chitra_RHI_API* api);
+  const Chitra_RHI_API* chitra_rhi_get_api(void);
   ```
-* **Responsibility:** Abstracts all GPU driver operations (pipeline binding, vertex buffer uploading, hardware scissor configuration, draw dispatch, and texture allocation). The core engine interacts exclusively with this interface.
+* **Responsibility:** Abstracts all GPU driver operations (pipeline binding, transient vertex/index buffer uploading, hardware scissor configuration, draw dispatch, dynamic texture pool, and sub-rect VRAM updates). The core engine interacts exclusively with this interface. Supports runtime RHI registration (`chitra_rhi_set_api`) for mock headless unit testing.
 
 ### D. [include/chitra_font.h](../../include/chitra_font.h)
 * **Role:** Defines the modular Typography Subsystem contract.
@@ -130,8 +135,8 @@ Headers located in `include/` define the API contracts across the system. They c
 * **Responsibility:** Declares Shape quad allocation, staging buffer access, and compaction for SDF rounded boxes, borders, and pills.
 
 ### G. [include/chitra_texture.h](../../include/chitra_texture.h)
-* **Role:** Internal interface for the dedicated Texture pipeline.
-* **Responsibility:** Declares Texture quad allocation, staging buffer access, and sprite UV setters.
+* **Role:** Public/internal interface for the dedicated Texture Pipeline, dynamic VRAM atlas packing, and spritesheet mapping.
+* **Responsibility:** Declares `chitra_texture_load()`, `chitra_texture_load_file()`, `chitra_texture_set_src_rect()`, bounds/UV/tint setters, ref-counting hooks, and atlas introspection getters.
 
 ### H. [include/chitra_batch.h](../../include/chitra_batch.h)
 * **Role:** Internal interface for sorting, 32-bit index streaming, and batch coalescing.
@@ -161,7 +166,7 @@ The files in `src/` contain the platform-independent core logic of Chitra. They 
   1. **Command Table:** Owns the `Chitra_CommandSlot` table and explicit boolean alive tracking array.
   2. **LIFO Recycler:** Owns `Chitra_FreeList` for recycling destroyed handles in $O(1)$.
   3. **Delegated Allocation:** Directs `chitra_create()` to dedicated pipeline allocators (`chitra_shape_alloc`, `chitra_texture_alloc`).
-  4. **State Modifiers:** Mutates visual sort keys (Draw Order, Clip, Texture ID) in RAM.
+  4. **State Modifiers & Introspection:** Mutates visual sort keys (Draw Order, Clip, Texture ID) in RAM and implements runtime debug getters (`chitra_get_texture_id`, `chitra_get_clip_id`, `chitra_get_pipeline_id`, `chitra_get_draw_order`).
 
 ### C. [src/chitra_shape.c](../../src/chitra_shape.c)
 * **Module:** Dedicated Shape Pipeline
@@ -172,11 +177,14 @@ The files in `src/` contain the platform-independent core logic of Chitra. They 
   4. **Compaction:** Compacts dead shape quads during idle frames.
 
 ### D. [src/chitra_texture.c](../../src/chitra_texture.c)
-* **Module:** Dedicated Texture Pipeline
+* **Module:** Dynamic RGBA Texture & VRAM Atlas Pipeline
 * **Responsibilities:**
-  1. **Staging Buffer:** Owns `s_texture_pipe` (20-byte `Chitra_TextVertex` staging array).
-  2. **Quad Allocation:** Reserves 4 textured quad vertices on creation.
-  3. **Setters:** Implements `chitra_texture_set_bounds()`, `chitra_texture_set_uv()`, and `chitra_texture_set_color()`.
+  1. **Staging Buffer:** Owns `s_texture_pipe` (20-byte `Chitra_TextVertex` staging array sharing vertex layout with Text).
+  2. **Hybrid Direct-to-VRAM Loading:** Packs small images ($\le 512\times 512$) into active dynamic 1024x1024 atlases via `stb_rect_pack.h` directly to GPU VRAM with zero CPU staging memory; allocates standalone GPU textures for large images ($> 512\times 512$).
+  3. **Multi-Page Atlas Growth:** Dynamically allocates new atlas pages upon cursor overflow without invalidating existing elements.
+  4. **Ref-Counting & 35% Auto-Evacuation:** Tracks living quad references and accumulated dead pixel area; automatically flags and evicts dead textures when dead ratio reaches $\ge 35\%$.
+  5. **Direct File Loading:** Integrates `stb_image.h` (`chitra_texture_load_file()`) for 1-call PNG/JPG/BMP ingestion.
+  6. **Spritesheet Mapping:** Implements `chitra_texture_set_src_rect()` to map sub-rectangles across both standalone textures and atlas-packed regions seamlessly.
 
 ### E. [src/chitra_font.c](../../src/chitra_font.c)
 * **Module:** Dedicated Typography Pipeline
@@ -268,19 +276,25 @@ Shaders are authored in GLSL and cross-compiled to platform-native shading langu
   Applies `smoothstep()` for sub-pixel anti-aliasing. If border thickness is greater than zero, evaluates an inner distance field to blend border and fill colors.
 
 ### B. [chitra_text.glsl](../../src/backends/shaders/chitra_text.glsl)
-* **Pipeline:** Text & Texture Pipeline (`CHITRA_PIPELINE_TEXTURE`)
-* **Vertex Inputs:** Position (`pos`), Texture/Atlas UVs (`uv`), Tint Color (`color`).
-* **Vertex Shader:** Transforms logical pixel positions into NDC coordinates.
-* **Fragment Shader:** Samples the red channel of the font atlas texture as alpha coverage and multiplies by the tinted vertex color:
-  ```glsl
-  float alpha = texture(sampler2D(tex, smp), v_uv).r;
-  frag_color = vec4(v_color.rgb, v_color.a * alpha);
-  ```
+* **Pipeline:** Unified Text & Texture Pipelines (`CHITRA_PIPELINE_TEXT` and `CHITRA_PIPELINE_TEXTURE`)
+* **Vertex Inputs:** Position (`pos`), Texture/Atlas UVs (`uv`), Tint Color (`color`). Uses identical 20-byte `Chitra_TextVertex` stride.
+* **Vertex Shader (`vs_text`):** Transforms logical pixel positions into NDC coordinates for both text glyphs and image quads.
+* **Fragment Shaders:**
+  * `fs_text`: Samples the red channel of the font atlas texture as alpha coverage and multiplies by vertex color:
+    ```glsl
+    float alpha = texture(sampler2D(tex, smp), v_uv).r;
+    frag_color = vec4(v_color.rgb, v_color.a * alpha);
+    ```
+  * `fs_texture`: Samples 4-channel RGBA texture and modulates with vertex tint color:
+    ```glsl
+    frag_color = v_color * texture(sampler2D(tex, smp), v_uv);
+    ```
+* **Programs Compiled:** `@program text vs_text fs_text` and `@program texture vs_text fs_texture`.
 
 ### C. [gen/](../../src/backends/shaders/gen)
 * Contains pre-generated C headers produced by `sokol-shdc`:
   * `chitra_shape.glsl.h`: Contains byte arrays for HLSL5, Metal, and GLSL shape shaders.
-  * `chitra_text.glsl.h`: Contains byte arrays for HLSL5, Metal, and GLSL text shaders.
+  * `chitra_text.glsl.h`: Contains byte arrays for HLSL5, Metal, and GLSL text and texture shaders.
 * Embedded directly into `sokol_rhi.c` via `#include`.
 
 ---
@@ -293,21 +307,34 @@ All dependencies are maintained as vendored source distributions within `third_p
 | :--- | :--- | :--- |
 | **Sokol** | `third_party/sokol/` | Single-file header-only C libraries for modern graphics (`sokol_gfx.h`), windowing (`sokol_app.h`), high-resolution time (`sokol_time.h`), and platform glue (`sokol_glue.h`). |
 | **Sokol Tools** | `third_party/sokol-tools/` | Precompiled binary cross-compiler (`sokol-shdc.exe`) used during CMake builds to generate shader headers. |
-| **FontStash** | `third_party/fontstash/` | Lightweight single-file font atlas generation library (`fontstash.h`) with Truetype glyph rasterization. |
+| **FontStash** | `third_party/fontstash/` | Lightweight single-file font atlas generation library (`fontstash.h`) with glyph rasterization. |
+| **STB Libraries** | `third_party/stb/` | Public domain single-header utilities: `stb_image.h` (image file loading), `stb_rect_pack.h` (2D bin packing for dynamic VRAM atlas), and `stb_truetype.h` (embedded font parsing). |
 
 ---
 
-## 7. Standalone Test Harness (`sandbox/`)
+## 7. Test Harnesses and Validation (`sandbox/` and `tests/`)
 
-### [sandbox/chitra_sandbox.c](../../sandbox/chitra_sandbox.c)
-* **Role:** Standalone testing harness for engine validation and feature demonstration.
+### A. [sandbox/chitra_sandbox.c](../../sandbox/chitra_sandbox.c)
+* **Role:** Interactive standalone visual testing harness for engine validation and feature demonstration.
 * **Capabilities:**
   * Tests shape rendering (rectangles, rounded cards, pill buttons, borders).
   * Validates font loading, multi-line wrapped text, and dynamic text measurement.
   * Validates hardware scissor clipping stacks.
   * Tests interactive input handling (mouse clicks, dragging, keyboard navigation).
   * Measures frame pacing and verifies 0% idle frame suspension.
-* **Independence:** Builds directly against `libchitra.a` / `chitra.lib` without requiring any external UI framework or third-party runtime.
+* **Independence:** Builds directly against `libchitra.a` / `chitra.lib` without requiring any external UI framework.
+
+### B. [tests/test_texture.c](../../tests/test_texture.c)
+* **Role:** Automated headless unit test suite verifying the Texture Pipeline and Dynamic Atlas Subsystem.
+* **Capabilities:**
+  * Tests mock headless RHI registration (`chitra_rhi_set_api`).
+  * Validates standalone texture allocation for images $> 512\times 512$.
+  * Validates dynamic 1024x1024 atlas bin-packing and direct-to-VRAM sub-rectangle uploads (`update_texture_sub_rgba`).
+  * Validates multi-page atlas growth, cursor overflow, and page spillover.
+  * Verifies living quad reference counting and 35% dead-area auto-evacuation.
+  * Verifies spritesheet and local rect UV coordinate translation (`chitra_texture_set_src_rect`).
+  * Verifies image file ingestion via `stb_image` (`chitra_texture_load_file`).
+  * Validates runtime introspection debug getters (`chitra_get_texture_id`, `chitra_get_clip_id`, `chitra_get_pipeline_id`, `chitra_get_draw_order`).
 
 ---
 

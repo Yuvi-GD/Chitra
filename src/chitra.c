@@ -3,6 +3,7 @@
 #include "chitra_font.h"
 #include "chitra_batch.h"
 #include "chitra_clip.h"
+#include "chitra_texture.h"
 #include "chitra_rhi.h"
 #include "chitra_hal.h"
 #include <stdio.h>
@@ -18,19 +19,22 @@ void chitra_internal_init(void) {
     chitra_table_init();
     chitra_batch_init();
     chitra_clip_init();
+    chitra_texture_init();
     chitra_font_get_api()->init();
 }
 
 void chitra_internal_term(void) {
     chitra_font_get_api()->term();
+    chitra_texture_term();
     chitra_clip_term();
     chitra_batch_term();
     chitra_table_term();
 }
 
 void chitra_internal_prepare(void) {
-    /* 1. Single-Upload Font Atlas Synchronization */
+    /* 1. Single-Upload Font Atlas & Dynamic Texture Atlas Synchronization */
     chitra_font_get_api()->prepare();
+    chitra_texture_prepare();
 
     /* 2. Process sorting, 32-bit index streaming, and batch coalescing (only when scene changes) */
     if (chitra_table_is_dirty()) {

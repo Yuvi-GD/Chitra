@@ -227,36 +227,67 @@ void chitra_get_font_metrics(int font_id, float size,
 
 ### C. The Texture Pipeline (`CHITRA_PIPELINE_TEXTURE`)
 
-Operates on 20-byte `Chitra_TextVertex` quads mapping arbitrary hardware texture images.
+Operates on 20-byte `Chitra_TextVertex` quads mapping arbitrary hardware texture images, dynamic VRAM atlases, and spritesheets.
 
-#### 1. Texture Asset Management
+#### 1. Texture Loading & Direct-to-VRAM Atlas Ingestion
 ```c
-/* Loads an image file (PNG/JPG) into GPU VRAM. Returns texture_id (0 to 8,191) */
-uint16_t chitra_load_texture(const char* file_path);
+/* Unified Texture Loading:
+ * - If w > 512 or h > 512: Allocates a dedicated Standalone GPU texture (UV = 0..1).
+ * - If w <= 512 and h <= 512: Packs into Chitra's dynamic 1024x1024 VRAM atlas via stb_rect_pack (UV = atlas sub-rect).
+ * - Automatically assigns texture_id to element sort key and writes UV coordinates to vertices. */
+bool chitra_texture_load(uint32_t handle, int width, int height, const void* rgba_pixels);
 
-/* Creates a dynamic GPU texture from raw RGBA8 pixel memory */
-uint16_t chitra_create_texture_rgba(int width, int height, const uint8_t* pixels);
+/* One-call file loading (PNG/JPG/BMP) directly to VRAM via embedded stb_image.h */
+bool chitra_texture_load_file(uint32_t handle, const char* file_path);
 
-/* Updates a sub-region of a dynamic GPU texture */
-void chitra_update_texture_rgba(uint16_t texture_id, int x, int y, int w, int h, const uint8_t* pixels);
-
-/* Frees GPU texture and releases descriptor slot */
-void chitra_destroy_texture(uint16_t texture_id);
+/* Low-level standalone RGBA texture allocation and updates */
+uint16_t chitra_create_texture_rgba(int width, int height);
+void     chitra_update_texture_rgba(uint16_t id, const void* pixels, int width, int height);
+void     chitra_destroy_texture(uint16_t id);
 ```
 
-#### 2. Textured Node Setters
+#### 2. Textured Element Setters
 ```c
-/* Binds the active texture asset to this node */
-void chitra_textured_rect_set_texture(uint32_t handle, uint16_t texture_id);
-
 /* Sets screen destination bounds in logical window points */
-void chitra_textured_rect_set_bounds(uint32_t handle, float x, float y, float w, float h);
+bool chitra_texture_set_bounds(uint32_t handle, float x, float y, float w, float h);
 
-/* Sets normalized UV coordinates (0.0 to 1.0) for sprite sheets and cropping */
-void chitra_textured_rect_set_uv(uint32_t handle, float u0, float v0, float u1, float v1);
+/* Retrieves current pixel width and height of textured quad */
+bool chitra_texture_get_bounds(uint32_t handle, float* out_w, float* out_h);
+
+/* Spritesheet / Local Rect UV Mapping:
+ * Maps a local pixel sub-rectangle (src_x, src_y, src_w, src_h) relative to image size (img_w, img_h).
+ * Works identically for Standalone textures and Dynamic Atlas packed regions! */
+bool chitra_texture_set_src_rect(uint32_t handle, float src_x, float src_y, float src_w, float src_h, float img_w, float img_h);
+
+/* Explicit normalized UV coordinates (0.0 to 1.0) */
+bool chitra_texture_set_uv(uint32_t handle, float u0, float v0, float u1, float v1);
 
 /* Sets multiplicative packed RGBA8 tint color (0xFFFFFFFF = untinted original) */
-void chitra_textured_rect_set_tint(uint32_t handle, uint32_t tint_color);
+bool chitra_texture_set_color(uint32_t handle, uint32_t tint_color);
+```
+
+#### 3. Runtime Inspection & Introspection Getters (Debugging & Automation)
+> [!WARNING]
+> Internal GPU texture IDs are ephemeral and volatile. They may change dynamically across frames during atlas defragmentation, compaction, repacking, or batch optimization. Use strictly for introspection and testing; do not cache!
+
+```c
+/* Returns internal GPU texture ID currently assigned to this element (or 0 if unassigned) */
+uint16_t chitra_get_texture_id(uint32_t handle);
+
+/* Returns hardware scissor clip ID currently assigned to this element */
+uint16_t chitra_get_clip_id(uint32_t handle);
+
+/* Returns pipeline type ID (e.g., CHITRA_PIPELINE_SHAPE, TEXT, or TEXTURE) */
+uint8_t  chitra_get_pipeline_id(uint32_t handle);
+
+/* Returns visual draw order / z-index (0..1,073,741,823) */
+uint32_t chitra_get_draw_order(uint32_t handle);
+
+/* Atlas introspection */
+bool     chitra_texture_is_atlas(uint16_t tex_id);
+uint32_t chitra_texture_get_ref_count(uint16_t tex_id);
+uint32_t chitra_texture_get_allocated_area(uint16_t tex_id);
+uint32_t chitra_texture_get_dead_area(uint16_t tex_id);
 ```
 
 ### D. The Vector & Mesh Pipeline (`CHITRA_PIPELINE_MESH`)

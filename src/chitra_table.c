@@ -1,4 +1,5 @@
 #include "chitra_table.h"
+#include "chitra_texture.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -265,6 +266,10 @@ void chitra_destroy(uint32_t handle) {
         s_pipelines[pipeline].dead_count += count;
     }
 
+    if (pipeline == CHITRA_PIPELINE_TEXTURE) {
+        chitra_texture_on_destroy(handle);
+    }
+
     /* Mark slot dead */
     slot->vertex_meta = 0;
 
@@ -314,6 +319,34 @@ void chitra_set_texture(uint32_t handle, uint16_t texture_id) {
     uint64_t masked = slot->sort_key & ~((uint64_t)CHITRA_TEXTURE_ID_MASK);
     slot->sort_key = masked | ((uint64_t)(texture_id & CHITRA_TEXTURE_ID_MASK));
     s_table_dirty = true;
+}
+
+/* =========================================================================
+ * Runtime Inspection Getters (Introspection & Debugging Only)
+ * ========================================================================= */
+
+uint16_t chitra_get_texture_id(uint32_t handle) {
+    if (!chitra_is_alive(handle)) return 0;
+    const Chitra_CommandSlot* slot = &s_cmd_table.slots[handle];
+    return (uint16_t)(slot->sort_key & CHITRA_TEXTURE_ID_MASK);
+}
+
+uint16_t chitra_get_clip_id(uint32_t handle) {
+    if (!chitra_is_alive(handle)) return 0;
+    const Chitra_CommandSlot* slot = &s_cmd_table.slots[handle];
+    return (uint16_t)((slot->sort_key >> 18) & CHITRA_CLIP_ID_MASK);
+}
+
+uint8_t chitra_get_pipeline_id(uint32_t handle) {
+    if (!chitra_is_alive(handle)) return 0;
+    const Chitra_CommandSlot* slot = &s_cmd_table.slots[handle];
+    return (uint8_t)((slot->sort_key >> 13) & CHITRA_PIPELINE_MASK);
+}
+
+uint32_t chitra_get_draw_order(uint32_t handle) {
+    if (!chitra_is_alive(handle)) return 0;
+    const Chitra_CommandSlot* slot = &s_cmd_table.slots[handle];
+    return (uint32_t)((slot->sort_key >> 34) & CHITRA_DRAW_ORDER_MASK);
 }
 
 /* =========================================================================

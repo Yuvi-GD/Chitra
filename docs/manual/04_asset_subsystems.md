@@ -1,35 +1,36 @@
-# Chapter 04: Asset Subsystems (Fonts and Vectors)
+# Chapter 04: Asset Subsystems (Fonts, Textures, and Vectors)
 
 ## 1. Overview of Asset Management in Chitra
 
-A rendering engine must handle two primary categories of visual assets beyond simple geometric shapes:
+A rendering engine must handle three primary categories of visual assets beyond simple geometric shapes:
 1. **Typography:** Rasterizing font glyphs, managing texture atlases, shaping text runs, and computing layout bounds.
-2. **Vector Graphics:** Ingesting arbitrary vector paths, polygons, and SVG curves without introducing heavy runtime dependencies.
+2. **Dynamic RGBA Textures:** Loading image files (PNG, JPG, BMP), dynamic VRAM atlas bin-packing, standalone GPU allocations, and spritesheet sub-rect mapping.
+3. **Vector Graphics:** Ingesting arbitrary vector paths, polygons, and SVG curves without introducing heavy runtime dependencies.
 
-Chitra decouples asset ingestion from vertex submission. Regardless of whether an asset originates from a TrueType font file or an SVG path, it is processed into standard 20-byte vertices and submitted through unified GPU pipelines.
+Chitra decouples asset ingestion from vertex submission. Regardless of whether an asset originates from a TrueType font file, a raster image, or an SVG path, it is processed into standard 20-byte vertices and submitted through unified GPU pipelines.
 
 ```
-+------------------------------------------------------------------------+
-|                          ASSET INGESTION LAYER                         |
-+-----------------------------------+------------------------------------+
-| Typography Subsystem              | Vector Subsystem                   |
-| - FontStash + stb_truetype (Lean) | - SVG Path Parsing                 |
-| - FreeType + HarfBuzz (Enterprise)| - Polygon Contour Extraction       |
-+-----------------------------------+------------------------------------+
-                                    |
-                                    v
-+------------------------------------------------------------------------+
-|                      PROCESSING & PACKING STAGE                        |
-| - Dynamic Alpha Atlas Packing     | - Zero-Allocation Triangulation    |
-| - Single-Upload GPU Sync          |   via earcut.h                     |
-+-----------------------------------+------------------------------------+
-                                    |
-                                    v
-+------------------------------------------------------------------------+
-|                    UNIFIED CHITRA PIPELINE EMISSION                    |
-| - Staging Array: Contiguous 20-byte Chitra_TextVertex quads & meshes   |
-| - GPU Shaders: Texture/Mesh Pipeline (Pure modulation, zero branching) |
-+------------------------------------------------------------------------+
++----------------------------------------------------------------------------+
+|                          ASSET INGESTION LAYER                             |
++-------------------+------------------------------+-------------------------+
+| Typography        | Dynamic RGBA Textures        | Vector Subsystem        |
+| - FontStash (Lean)| - stb_image (PNG/JPG/BMP)    | - SVG Path Parsing      |
+| - FreeType/HarfB. | - stb_rect_pack (VRAM Atlas) | - Contour Extraction    |
++-------------------+------------------------------+-------------------------+
+                                     |
+                                     v
++----------------------------------------------------------------------------+
+|                      PROCESSING & PACKING STAGE                            |
+| - Dynamic Alpha Font Atlas Packing | - Direct-to-VRAM Atlas Sub-Upload     |
+| - Zero CPU Staging for Images      | - earcut.h Triangulation              |
++------------------------------------+---------------------------------------+
+                                     |
+                                     v
++----------------------------------------------------------------------------+
+|                    UNIFIED CHITRA PIPELINE EMISSION                        |
+| - Staging Array: Contiguous 20-byte Chitra_TextVertex quads & meshes       |
+| - GPU Shaders: Texture/Text/Mesh Pipeline (Pure modulation, zero branching)|
++----------------------------------------------------------------------------+
 ```
 
 ---
@@ -87,7 +88,58 @@ Chitra enforces a strict single-upload policy:
 
 ---
 
-## 4. Decoupled Text Measurement and Word Wrapping
+## 4. The Dynamic RGBA Texture Subsystem
+
+Beyond typography, UI applications render rich visual assets: icons, avatars, photos, backgrounds, and game sprites. In naive 2D engines, every loaded image allocates an isolated GPU texture, causing severe draw call fragmentation whenever adjacent elements sample different textures.
+
+Chitra implements a **Hybrid Direct-to-VRAM Texture Subsystem** backed by [`stb_image.h`](../../third_party/stb/stb_image.h) and [`stb_rect_pack.h`](../../third_party/stb/stb_rect_pack.h):
+
+```
+                       INCOMING IMAGE ASSET
+                                │
+                  Dimension Threshold: 512x512
+                                │
+        ┌───────────────────────┴───────────────────────┐
+        ▼                                               ▼
+ Width/Height > 512px                           Width/Height <= 512px
+(Large Photos, Backgrounds)                    (Icons, Badges, Avatars, Buttons)
+        │                                               │
+        ▼                                               ▼
+[ Standalone GPU Texture ]                    [ Dynamic 1024x1024 RGBA Atlas ]
+ - Isolated GPU handle                         - Packed via stb_rect_pack
+ - UVs normalized: (0..1)                      - Sub-rect UVs assigned to quad
+ - Zero CPU staging RAM                        - Coalesces into 1 GPU Draw Call!
+```
+
+### 4.1 Zero-Byte CPU Staging (Direct-to-VRAM Streaming)
+Traditional engines keep multi-megabyte image copies in CPU system RAM so they can re-upload them or perform CPU blitting. Chitra enforces a **Zero CPU Staging Policy**:
+1. When [`chitra_texture_load()`](../../src/chitra_texture.c) or [`chitra_texture_load_file()`](../../src/chitra_texture.c) is called, pixels are uploaded immediately to GPU VRAM via `rhi->update_texture_sub_rgba()`.
+2. The source CPU pixel buffer is freed instantaneously.
+3. The element's quad vertices receive normalized UVs addressing the exact packed region within the atlas page.
+
+### 4.2 Multi-Page Atlas Growth & Auto-Spillover
+A single atlas page is configured to 1024x1024 pixels (or 2048x2048). When an incoming icon cannot fit within the current active atlas:
+1. `stbrp_pack_rects()` detects the page is full.
+2. Chitra dynamically requests a new RGBA texture handle from the RHI.
+3. The new page becomes the active packing cursor; subsequent elements pack into Page 2 without invalidating Page 1.
+
+### 4.3 Ref-Counting, Dead Pixels & 35% Auto-Evacuation
+To prevent VRAM memory leaks in long-running applications:
+* Every texture tracks `ref_count` (number of living quads sampling it), `allocated_area`, and `dead_area`.
+* When a textured element is destroyed via `chitra_destroy(handle)`, `chitra_texture_on_destroy()` decrements `ref_count` and adds the quad's pixel area to `dead_area`.
+* When an atlas page's dead ratio exceeds **35%** ($\frac{\text{dead\_area}}{\text{allocated\_area}} \ge 0.35$):
+  * The page is marked for evacuation.
+  * Once living references reach zero, the entire GPU texture is destroyed and recycled via the RHI free list.
+
+### 4.4 Spritesheet & Local Rect UV Mapping
+For game sprites, icon sheets, and UI texture atlases, [`chitra_texture_set_src_rect()`](../../src/chitra_texture.c) allows clients to specify sub-rectangles `(src_x, src_y, src_w, src_h)` relative to original image dimensions:
+* **Standalone Textures:** Directly maps proportional UV ranges within $(0.0 \dots 1.0)$.
+* **Atlas-Packed Textures:** Seamlessly translates the local crop relative to the allocated bounding box within the larger atlas page.
+* The client framework uses the exact same function signature regardless of where the image resides.
+
+---
+
+## 5. Decoupled Text Measurement and Word Wrapping
 
 A common architectural trap in UI rendering is coupling text measurement with geometry generation. Layout engines (such as Flexbox or CSS solvers) must know the rendered dimensions of a text block *before* calculating parent container sizes and child positions.
 
@@ -105,7 +157,7 @@ When `wrap_width > 0`, text wrapping operates on whitespace word boundaries:
 
 ---
 
-## 5. The Vector Graphics Subsystem (SVG and Polygons)
+## 6. The Vector Graphics Subsystem (SVG and Polygons)
 
 Many UI toolkits embed massive C++ vector rasterizers (such as Skia, Cairo, or ThorVG) to display SVG icons and vector illustrations. These libraries add megabytes of binary bloat and consume significant CPU cycles rasterizing paths into software bitmaps.
 
@@ -135,7 +187,7 @@ Chitra utilizes a lightweight, hardware-accelerated vector pipeline:
 
 ---
 
-## 6. High-DPI Displays and Scissor Coordinate Mapping
+## 7. High-DPI Displays and Scissor Coordinate Mapping
 
 Modern desktop environments frequently operate under display scaling factors (e.g., 1.25x, 1.5x, 2.0x on Retina or 4K monitors). This introduces a critical distinction between **logical UI coordinates** and **physical framebuffer pixels**:
 
@@ -156,7 +208,7 @@ Chitra guards against this by clamping scissor dimensions to zero and bypassing 
 
 ---
 
-## 7. Next Steps
+## 8. Next Steps
 
 To examine the concrete source code layout and understand how each file in the repository maps to these subsystems, continue to:
 * **[Chapter 05: Source Tree and File Responsibilities](05_file_responsibilities.md)**: Repository structure, public headers, internal headers, backend implementations, and shader files.

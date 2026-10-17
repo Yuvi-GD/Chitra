@@ -40,7 +40,6 @@ set(GEN_DIR "${SHADER_DIR}/gen")
 set(SHADER_FILES
     "chitra_shape.glsl"
     "chitra_text.glsl"
-    "chitra_texture.glsl"
 )
 
 set(GENERATED_HEADERS "")
@@ -89,6 +88,7 @@ target_include_directories(chitra PRIVATE
     "${SOKOL_DIR}"
     "${SOKOL_DIR}/util"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/fontstash"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb"
 )
 
 # Pass the backend selection macro to the C compiler (e.g., -DSOKOL_D3D11)
@@ -111,3 +111,14 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     target_link_libraries(chitra_sandbox PRIVATE "-framework Cocoa" "-framework QuartzCore" "-framework Metal" "-framework MetalKit")
 endif()
+
+# ==============================================================================
+# SECTION 5: Headless Texture Pipeline Test
+# ==============================================================================
+add_executable(test_texture tests/test_texture.c)
+target_link_libraries(test_texture PRIVATE chitra)
+target_include_directories(test_texture PRIVATE "${SOKOL_DIR}")
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    target_link_libraries(test_texture PRIVATE dwmapi)
+endif()
+

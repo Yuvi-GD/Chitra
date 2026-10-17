@@ -33,6 +33,7 @@ typedef struct {
     void     (*update_texture)(uint16_t id, const unsigned char* data, int width, int height);
     uint16_t (*create_texture_rgba)(int width, int height);
     void     (*update_texture_rgba)(uint16_t id, const void* data, int width, int height);
+    void     (*update_texture_sub_rgba)(uint16_t id, int dst_x, int dst_y, int w, int h, const void* data);
     void     (*destroy_texture)(uint16_t id);
 
     void (*end_frame)(void);
@@ -40,6 +41,7 @@ typedef struct {
 } Chitra_RHI_API;
 
 /* Backend registration */
+void chitra_rhi_set_api(const Chitra_RHI_API* api);
 const Chitra_RHI_API* chitra_rhi_get_api(void);
 
 #endif /* CHITRA_RHI_H */

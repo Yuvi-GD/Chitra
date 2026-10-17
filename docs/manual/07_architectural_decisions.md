@@ -260,6 +260,61 @@ Chitra implements **Event-Driven 0% Idle Frame Pacing**:
 
 ---
 
+## ADR-012: Hybrid Standalone vs. Dynamic VRAM Atlas for Texture Images
+
+### Context & Problem Statement
+In traditional 2D UI renderers, loading image assets (icons, avatars, badges, button sprites, and user photos) creates two major performance bottlenecks:
+1. **Draw Call Fragmentation:** Every distinct GPU texture requires a separate draw call. If a dashboard has 30 small icons loaded as separate textures, Chitra's state coalescing bitmask (`CHITRA_STATE_MASK`) would be forced to break batches 30 times, even if all icons are drawn on the same visual layer.
+2. **CPU Staging RAM Waste:** Naive engines retain multi-megabyte copies of raw decoded RGBA pixels in CPU system RAM, doubling application memory footprints.
+
+### Decision Outcome
+Chitra implements a **Hybrid Direct-to-VRAM Texture Subsystem** backed by `stb_rect_pack.h` and `stb_image.h`:
+1. **Dimension Threshold (512x512):**
+   * **Small Images ($\le 512\times 512$):** Automatically packed into Chitra's active 1024x1024 dynamic RGBA atlas. Quads receive normalized sub-rect UVs. All small images coalesce into **a single GPU draw call**.
+   * **Large Images ($> 512\times 512$):** Allocated as dedicated standalone GPU textures to avoid thrashing or occupying entire atlas pages.
+2. **Zero-Byte CPU Staging (Direct-to-VRAM):**
+   * Pixel data is uploaded immediately to VRAM via `rhi->update_texture_sub_rgba()`.
+   * CPU pixel buffers are freed instantaneously; zero lingering image bytes remain in CPU RAM.
+3. **Multi-Page Atlas Growth & Auto-Spillover:**
+   * When an atlas page fills up, a new 1024x1024 page is allocated on demand.
+4. **Ref-Counting & 35% Dead-Area Evacuation:**
+   * Every texture tracks active quad references (`ref_count`) and dead area (`dead_area`).
+   * When an atlas page's dead ratio reaches $\ge 35\%$, the page is flagged for evacuation and cleanly unloaded once living references reach zero.
+
+### Consequences
+* **Positive:** Drastic reduction in GPU draw calls. Dozens of UI icons, avatars, and badges coalesce into 1 single draw call.
+* **Positive:** Zero CPU RAM bloat. Images exist strictly in GPU VRAM.
+* **Positive:** Automatic memory leak protection via ref-counting and 35% dead-area recycling.
+* **Negative:** Modifying an atlas-packed image requires sub-rect VRAM updates, and packing logic incurs a one-time CPU cost upon image load.
+
+---
+
+## ADR-013: Shader Unification of Text and Texture Pipelines
+
+### Context & Problem Statement
+The Text Pipeline (`CHITRA_PIPELINE_TEXT`) and Texture Pipeline (`CHITRA_PIPELINE_TEXTURE`) share identical geometric properties:
+* Both operate on 20-byte `Chitra_TextVertex` quads (`pos[2]`, `uv[2]`, `color`).
+* Both transform 2D pixel coordinates to Normalized Device Coordinates (NDC) identically in the vertex shader.
+* Both sample a 2D texture via UV coordinates and modulate with vertex color.
+
+Maintaining separate shader files (`chitra_text.glsl` and `chitra_texture.glsl`) introduced redundant CMake compilation rules, duplicated vertex shader code, and increased binary build times.
+
+### Decision Outcome
+Chitra consolidates both pipelines into a single shader translation unit: [`chitra_text.glsl`](../../src/backends/shaders/chitra_text.glsl):
+1. **Shared Vertex Shader (`vs_text`):** Transforms logical screen positions to NDC coordinates for both text glyphs and image quads.
+2. **Specialized Fragment Shaders:**
+   * `fs_text`: Samples the red channel of 8-bit alpha font atlases and modulates with tint color.
+   * `fs_texture`: Samples 4-channel RGBA textures and modulates with tint color.
+3. **Single Cross-Compilation Target:** `sokol-shdc` compiles both programs in a single command, generating `chitra_text.glsl.h`.
+
+### Consequences
+* **Positive:** Eliminates redundant vertex shader maintenance and reduces CMake build steps.
+* **Positive:** Perfect cache alignment: both pipelines share the exact same 20-byte vertex stride, simplifying memory compaction and staging array management.
+* **Positive:** `chitra_texture.glsl` was deleted cleanly without loss of functionality.
+* **Negative:** Both shader variants must be rebuilt together if either fragment algorithm changes.
+
+---
+
 ## 2. Next Steps
 
 To examine visual flowcharts and comprehensive Mermaid diagrams detailing these architectures, continue to:

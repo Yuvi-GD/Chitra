@@ -12,7 +12,7 @@ This manual documents the entire architecture from high-level philosophy and mem
 
 ## Manual Chapters
 
-The manual is divided into 8 focused chapters designed to be read sequentially or consulted as an on-demand reference:
+The manual is divided into 9 focused chapters designed to be read sequentially or consulted as an on-demand reference:
 
 | Chapter | Title | Primary Focus |
 | :---: | :--- | :--- |
@@ -24,6 +24,7 @@ The manual is divided into 8 focused chapters designed to be read sequentially o
 | **06** | [API Reference and Client Integration](manual/06_api_reference_and_integration.md) | Signature-by-signature C API contract, client framework integration guide, lifecycle hooks, and working code examples. |
 | **07** | [Architectural Decision Records (ADRs)](manual/07_architectural_decisions.md) | Detailed rationale and trade-offs behind every major architectural choice (the "Why"). |
 | **08** | [Visual Lifecycles and Flowcharts](manual/08_visual_flowcharts.md) | Comprehensive Mermaid diagrams tracing element creation, in-place RAM updates, sort key collection, and GPU batch dispatch. |
+| **09** | [Advanced Visual Effects & Shader Architecture](manual/09_future_shader_development.md) | Multi-quad shadows and outer glow, hardware vertex gradients, parameter-driven custom materials, and glassmorphism backdrop blur. |
 
 ---
 
@@ -53,6 +54,7 @@ Start with:
 1. [01. Architecture Overview](manual/01_architecture_overview.md) (System boundaries and mental model)
 2. [06. API Reference and Client Integration](manual/06_api_reference_and_integration.md) (How to call Chitra from client applications)
 3. [08. Visual Lifecycles and Flowcharts](manual/08_visual_flowcharts.md) (Visual trace of creation and frame updates)
+4. [09. Advanced Visual Effects & Shader Architecture](manual/09_future_shader_development.md) (Gradients, multi-quad shadows, glow, and materials)
 
 ### For Chitra Engine Maintainers
 Start with:
@@ -60,10 +62,12 @@ Start with:
 2. [03. Sorting and Draw Batching Pipeline](manual/03_sorting_and_batch_pipeline.md) (Radix Sort, index buffer, state machine)
 3. [05. Source Tree and File Responsibilities](manual/05_file_responsibilities.md) (File map and headers)
 4. [07. Architectural Decision Records (ADRs)](manual/07_architectural_decisions.md) (Why things were built this way)
+5. [09. Advanced Visual Effects & Shader Architecture](manual/09_future_shader_development.md) (Shaders, multi-quad geometry, and RHI blur passes)
 
 ### For AI Coding Assistants
 Before proposing code modifications or refactoring Chitra:
 - Read [05. Source Tree and File Responsibilities](manual/05_file_responsibilities.md) to ensure changes target the correct file.
 - Read [07. Architectural Decision Records (ADRs)](manual/07_architectural_decisions.md) to understand the technical rationales behind Chitra's data structures, sorting pipelines, and zero-allocation frame loop.
+- Read [09. Advanced Visual Effects & Shader Architecture](manual/09_future_shader_development.md) when designing or implementing visual shaders, materials, gradients, or shadows.
 
 ---

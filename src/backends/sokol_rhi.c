@@ -6,15 +6,20 @@
 #include "chitra_table.h"
 #include "chitra_batch.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "shaders/gen/chitra_shape.glsl.h"
 #include "shaders/gen/chitra_text.glsl.h"
-#include "shaders/gen/chitra_texture.glsl.h"
 
 #define CHITRA_RHI_INIT_VERTICES 256
 #define CHITRA_RHI_INIT_INDICES  384
-#define CHITRA_RHI_MAX_TEXTURES  64
+#define CHITRA_RHI_INIT_TEXTURE_CAPACITY 16
+
+#define CHITRA_RHI_MAX_TEXTURE_CAPACITY  8192
+
+#define CHITRA_RHI_UNIFORM_BUFFER_SIZE (64 * 1024) /* 64KB compact circular ring for uniforms */
+#define CHITRA_RHI_BUFFER_POOL_SIZE    32          /* 32 GPU buffer handles */
 
 typedef struct {
     sg_image img;
@@ -22,6 +27,16 @@ typedef struct {
     bool     active;
     bool     is_rgba;
 } RHI_Texture;
+
+typedef struct {
+    RHI_Texture* items;
+    uint16_t     count;         /* High-water mark (Slot 0 reserved as invalid) */
+    uint16_t     capacity;      /* Allocated item capacity */
+
+    uint16_t*    free_stack;    /* Recycled slot index stack */
+    uint16_t     free_count;    /* Recycled slot count */
+    uint16_t     free_capacity; /* Allocated free list capacity */
+} RHI_TexturePool;
 
 static struct {
     sg_pipeline  pip[CHITRA_PIPELINE_COUNT];
@@ -39,8 +54,8 @@ static struct {
     int          current_width;
     int          current_height;
 
-    /* Compile-Time Static Texture Registry (Zero Heap Allocation, 768B in BSS) */
-    RHI_Texture  textures[CHITRA_RHI_MAX_TEXTURES];
+    /* Dynamic Texture Pool: starts at ~224B, grows on demand up to 8192 */
+    RHI_TexturePool pool;
 } s_rhi = {0};
 
 /* =========================================================================
@@ -48,22 +63,31 @@ static struct {
  * ========================================================================= */
 
 static void rhi_init(const Chitra_Config* config) {
-    int ub_size   = (config && config->uniform_buffer_size > 0) ? config->uniform_buffer_size : (128 * 1024);
-    int max_buf   = (config && config->max_buffers > 0) ? config->max_buffers : 32;
+    (void)config;
 
-    /* Compact resource pools and 128KB uniform ring for minimal memory footprint */
+    /* Compact resource pools and 64KB uniform ring for minimal memory footprint */
     sg_desc desc = {
         .environment         = sglue_environment(),
         .logger.func         = slog_func,
-        .uniform_buffer_size = ub_size,
-        .buffer_pool_size    = max_buf,
-        .image_pool_size     = CHITRA_RHI_MAX_TEXTURES,
-        .view_pool_size      = CHITRA_RHI_MAX_TEXTURES,
+        .uniform_buffer_size = CHITRA_RHI_UNIFORM_BUFFER_SIZE,
+        .buffer_pool_size    = CHITRA_RHI_BUFFER_POOL_SIZE,
+        .image_pool_size     = 512,
+        .view_pool_size      = 512,
         .pipeline_pool_size  = 8,
         .shader_pool_size    = 4,
         .sampler_pool_size   = 4,
     };
     sg_setup(&desc);
+
+    /* Dynamic Texture Pool (starts at 16 capacity for items, slot 0 reserved) */
+    s_rhi.pool.capacity = CHITRA_RHI_INIT_TEXTURE_CAPACITY;
+    s_rhi.pool.items = (RHI_Texture*)calloc(s_rhi.pool.capacity, sizeof(RHI_Texture));
+    s_rhi.pool.count = 1; /* Slot 0 reserved as CHITRA_INVALID_HANDLE */
+
+    /* Recycler stack starts at 0 bytes (zero bloat, allocated only when items are freed) */
+    s_rhi.pool.free_stack = NULL;
+    s_rhi.pool.free_count = 0;
+    s_rhi.pool.free_capacity = 0;
 
     /* 1. Dynamic 32-Bit Index Buffer (Direct write_transient, zero staging buffer) */
     s_rhi.ibuf_capacity = CHITRA_RHI_INIT_INDICES * sizeof(uint32_t);
@@ -242,8 +266,8 @@ static void rhi_draw_batch(const Chitra_DrawBatch* batch) {
 
     /* Bind dynamic texture view if texture pipeline */
     if (pip != CHITRA_PIPELINE_SHAPE) {
-        if (batch->texture_id < CHITRA_RHI_MAX_TEXTURES && s_rhi.textures[batch->texture_id].active) {
-            s_rhi.bind[pip].views[0] = s_rhi.textures[batch->texture_id].view;
+        if (batch->texture_id > 0 && batch->texture_id < s_rhi.pool.count && s_rhi.pool.items[batch->texture_id].active) {
+            s_rhi.bind[pip].views[0] = s_rhi.pool.items[batch->texture_id].view;
         }
     }
 
@@ -254,16 +278,11 @@ static void rhi_draw_batch(const Chitra_DrawBatch* batch) {
             .u_resolution = { (float)s_rhi.current_width, (float)s_rhi.current_height }
         };
         sg_apply_uniforms(UB_vs_params, &SG_RANGE(shape_params));
-    } else if (pip == CHITRA_PIPELINE_TEXT) {
-        text_vs_params_t text_params = {
+    } else if (pip == CHITRA_PIPELINE_TEXT || pip == CHITRA_PIPELINE_TEXTURE) {
+        text_vs_params_t params = {
             .u_resolution = { (float)s_rhi.current_width, (float)s_rhi.current_height }
         };
-        sg_apply_uniforms(UB_text_vs_params, &SG_RANGE(text_params));
-    } else if (pip == CHITRA_PIPELINE_TEXTURE) {
-        texture_vs_params_t texture_params = {
-            .u_resolution = { (float)s_rhi.current_width, (float)s_rhi.current_height }
-        };
-        sg_apply_uniforms(UB_texture_vs_params, &SG_RANGE(texture_params));
+        sg_apply_uniforms(UB_text_vs_params, &SG_RANGE(params));
     }
 
     /* Dispatch 32-bit indexed draw call */
@@ -276,15 +295,53 @@ static void rhi_end_frame(void) {
 }
 
 /* =========================================================================
+ * Dynamic Growth (capacity architecture)
+ * ========================================================================= */
+
+static void ensure_texture_capacity(uint16_t needed) {
+    if (needed > s_rhi.pool.capacity) {
+        uint16_t new_cap = s_rhi.pool.capacity + (s_rhi.pool.capacity >> 1); /* 1.5x growth */
+        if (new_cap < needed) new_cap = needed + 16;
+        if (new_cap > CHITRA_RHI_MAX_TEXTURE_CAPACITY) new_cap = CHITRA_RHI_MAX_TEXTURE_CAPACITY;
+        if (new_cap <= s_rhi.pool.capacity) return;
+
+        RHI_Texture* new_items = (RHI_Texture*)realloc(s_rhi.pool.items, new_cap * sizeof(RHI_Texture));
+        if (new_items) {
+            memset(&new_items[s_rhi.pool.capacity], 0, (new_cap - s_rhi.pool.capacity) * sizeof(RHI_Texture));
+            s_rhi.pool.items = new_items;
+            s_rhi.pool.capacity = new_cap;
+        }
+    }
+}
+
+static void ensure_free_list_capacity(void) {
+    if (s_rhi.pool.free_count >= s_rhi.pool.free_capacity) {
+        uint16_t new_cap = s_rhi.pool.free_capacity + (s_rhi.pool.free_capacity >> 1);
+        if (new_cap < CHITRA_RHI_INIT_TEXTURE_CAPACITY) new_cap = CHITRA_RHI_INIT_TEXTURE_CAPACITY;
+        if (new_cap > CHITRA_RHI_MAX_TEXTURE_CAPACITY) new_cap = CHITRA_RHI_MAX_TEXTURE_CAPACITY;
+
+        uint16_t* new_stack = (uint16_t*)realloc(s_rhi.pool.free_stack, new_cap * sizeof(uint16_t));
+        if (new_stack) {
+            s_rhi.pool.free_stack = new_stack;
+            s_rhi.pool.free_capacity = new_cap;
+        }
+    }
+}
+
+/* =========================================================================
  * Texture Atlas Management (Compile-Time Registry & On-Demand Upload)
  * ========================================================================= */
 
 static uint16_t rhi_create_texture_internal(int width, int height, bool is_rgba) {
-    int slot = -1;
-    for (int i = 1; i < CHITRA_RHI_MAX_TEXTURES; i++) {
-        if (!s_rhi.textures[i].active) { slot = i; break; }
+    uint16_t slot = 0;
+    if (s_rhi.pool.free_count > 0) {
+        slot = s_rhi.pool.free_stack[--s_rhi.pool.free_count];
+    } else {
+        if (s_rhi.pool.count >= CHITRA_RHI_MAX_TEXTURE_CAPACITY) return 0;
+        ensure_texture_capacity(s_rhi.pool.count + 1);
+        if (s_rhi.pool.count >= s_rhi.pool.capacity) return 0;
+        slot = s_rhi.pool.count++;
     }
-    if (slot == -1) return 0;
 
     sg_image img = sg_make_image(&(sg_image_desc){
         .width = width,
@@ -299,28 +356,22 @@ static uint16_t rhi_create_texture_internal(int width, int height, bool is_rgba)
         .label = "chitra_view"
     });
 
-    s_rhi.textures[slot].img = img;
-    s_rhi.textures[slot].view = view;
-    s_rhi.textures[slot].active = true;
-    s_rhi.textures[slot].is_rgba = is_rgba;
+    s_rhi.pool.items[slot].img = img;
+    s_rhi.pool.items[slot].view = view;
+    s_rhi.pool.items[slot].active = true;
+    s_rhi.pool.items[slot].is_rgba = is_rgba;
 
-    return (uint16_t)slot;
-}
-
-static uint16_t rhi_create_texture(int width, int height) {
-    return rhi_create_texture_internal(width, height, false);
-}
-
-static uint16_t rhi_create_texture_rgba(int width, int height) {
-    return rhi_create_texture_internal(width, height, true);
+    return slot;
 }
 
 static void rhi_update_texture_internal(uint16_t id, const void* data, int width, int height) {
-    if (id == 0 || id >= CHITRA_RHI_MAX_TEXTURES || !s_rhi.textures[id].active) return;
-    sg_image img = s_rhi.textures[id].img;
-    size_t upload_size = (size_t)(width * height) * (s_rhi.textures[id].is_rgba ? 4 : 1);
+    if (id == 0 || id >= s_rhi.pool.count || !s_rhi.pool.items[id].active || !data) return;
+    sg_image img = s_rhi.pool.items[id].img;
+    int bpp = s_rhi.pool.items[id].is_rgba ? 4 : 1;
+    int bpr = width * bpp;
+    int bps = bpr * height;
+    size_t upload_size = (size_t)bps;
 
-    /* Transient staging buffer created strictly for this upload and destroyed immediately */
     sg_buffer staging = sg_make_buffer(&(sg_buffer_desc){
         .size = upload_size,
         .usage = { .staging_buffer = true, .write_transient = true, .copy_src = true },
@@ -333,13 +384,61 @@ static void rhi_update_texture_internal(uint16_t id, const void* data, int width
     });
 
     sg_copy_buffer_to_image(&(sg_copy_buffer_to_image_desc){
-        .src = { .buffer = staging },
-        .dst = { .image = img },
+        .src  = { .buffer = staging, .bytes_per_row = bpr, .bytes_per_slice = bps },
+        .dst  = { .image = img },
         .size = { .width = width, .height = height, .num_slices = 1 }
     });
 
-    /* Free upload buffer immediately: zero lingering staging memory */
     sg_destroy_buffer(staging);
+}
+
+static void rhi_update_texture_sub_rgba(uint16_t id, int dst_x, int dst_y, int w, int h, const void* data) {
+    if (id == 0 || id >= s_rhi.pool.count || !s_rhi.pool.items[id].active || !data || w <= 0 || h <= 0) return;
+    sg_image img = s_rhi.pool.items[id].img;
+    int bpr = w * 4;
+    int bps = bpr * h;
+    size_t upload_size = (size_t)bps;
+
+    sg_buffer staging = sg_make_buffer(&(sg_buffer_desc){
+        .size = upload_size,
+        .usage = { .staging_buffer = true, .write_transient = true, .copy_src = true },
+        .label = "chitra_staging_sub"
+    });
+
+    sg_write_buffer_transient(&(sg_write_buffer_desc){
+        .src.data   = { .ptr = data, .size = upload_size },
+        .dst.buffer = staging
+    });
+
+    sg_copy_buffer_to_image(&(sg_copy_buffer_to_image_desc){
+        .src  = { .buffer = staging, .bytes_per_row = bpr, .bytes_per_slice = bps },
+        .dst  = { .image = img, .x = dst_x, .y = dst_y },
+        .size = { .width = w, .height = h, .num_slices = 1 }
+    });
+
+    sg_destroy_buffer(staging);
+}
+
+static void rhi_destroy_texture(uint16_t id) {
+    if (id == 0 || id >= s_rhi.pool.count || !s_rhi.pool.items[id].active) return;
+    sg_destroy_view(s_rhi.pool.items[id].view);
+    sg_destroy_image(s_rhi.pool.items[id].img);
+    s_rhi.pool.items[id].view.id = SG_INVALID_ID;
+    s_rhi.pool.items[id].img.id  = SG_INVALID_ID;
+    s_rhi.pool.items[id].active  = false;
+
+    ensure_free_list_capacity();
+    if (s_rhi.pool.free_count < s_rhi.pool.free_capacity) {
+        s_rhi.pool.free_stack[s_rhi.pool.free_count++] = id;
+    }
+}
+
+static uint16_t rhi_create_texture(int width, int height) {
+    return rhi_create_texture_internal(width, height, false);
+}
+
+static uint16_t rhi_create_texture_rgba(int width, int height) {
+    return rhi_create_texture_internal(width, height, true);
 }
 
 static void rhi_update_texture(uint16_t id, const unsigned char* data, int width, int height) {
@@ -350,14 +449,20 @@ static void rhi_update_texture_rgba(uint16_t id, const void* data, int width, in
     rhi_update_texture_internal(id, data, width, height);
 }
 
-static void rhi_destroy_texture(uint16_t id) {
-    if (id == 0 || id >= CHITRA_RHI_MAX_TEXTURES || !s_rhi.textures[id].active) return;
-    sg_destroy_view(s_rhi.textures[id].view);
-    sg_destroy_image(s_rhi.textures[id].img);
-    s_rhi.textures[id].active = false;
-}
-
 static void rhi_cleanup(void) {
+    for (uint16_t i = 1; i < s_rhi.pool.count; i++) {
+        if (s_rhi.pool.items[i].active) {
+            sg_destroy_view(s_rhi.pool.items[i].view);
+            sg_destroy_image(s_rhi.pool.items[i].img);
+        }
+    }
+    if (s_rhi.pool.items) { free(s_rhi.pool.items); s_rhi.pool.items = NULL; }
+    if (s_rhi.pool.free_stack) { free(s_rhi.pool.free_stack); s_rhi.pool.free_stack = NULL; }
+    s_rhi.pool.count = 0;
+    s_rhi.pool.capacity = 0;
+    s_rhi.pool.free_count = 0;
+    s_rhi.pool.free_capacity = 0;
+
     sg_shutdown();
 }
 
@@ -366,21 +471,28 @@ static void rhi_cleanup(void) {
  * ========================================================================= */
 
 static const Chitra_RHI_API s_api = {
-    .init                = rhi_init,
-    .begin_frame         = rhi_begin_frame,
-    .upload_vertices     = rhi_upload_vertices,
-    .upload_indices      = rhi_upload_indices,
-    .set_scissor         = rhi_set_scissor,
-    .draw_batch          = rhi_draw_batch,
-    .end_frame           = rhi_end_frame,
-    .cleanup             = rhi_cleanup,
-    .create_texture      = rhi_create_texture,
-    .update_texture      = rhi_update_texture,
-    .create_texture_rgba = rhi_create_texture_rgba,
-    .update_texture_rgba = rhi_update_texture_rgba,
-    .destroy_texture     = rhi_destroy_texture
+    .init                    = rhi_init,
+    .begin_frame             = rhi_begin_frame,
+    .upload_vertices         = rhi_upload_vertices,
+    .upload_indices          = rhi_upload_indices,
+    .set_scissor             = rhi_set_scissor,
+    .draw_batch              = rhi_draw_batch,
+    .end_frame               = rhi_end_frame,
+    .cleanup                 = rhi_cleanup,
+    .create_texture          = rhi_create_texture,
+    .update_texture          = rhi_update_texture,
+    .create_texture_rgba     = rhi_create_texture_rgba,
+    .update_texture_rgba     = rhi_update_texture_rgba,
+    .update_texture_sub_rgba = rhi_update_texture_sub_rgba,
+    .destroy_texture         = rhi_destroy_texture
 };
 
+static const Chitra_RHI_API* s_custom_rhi = NULL;
+
+void chitra_rhi_set_api(const Chitra_RHI_API* api) {
+    s_custom_rhi = api;
+}
+
 const Chitra_RHI_API* chitra_rhi_get_api(void) {
-    return &s_api;
+    return s_custom_rhi ? s_custom_rhi : &s_api;
 }
