@@ -260,13 +260,6 @@ void chitra_destroy(uint32_t handle) {
     uint8_t pipeline = unpack_pipeline(slot->sort_key);
     uint32_t count = chitra_slot_vertex_count(slot);
 
-    if (pipeline < CHITRA_PIPELINE_COUNT && count > 0) {
-        s_pipelines[pipeline].dead_count += count;
-        if (s_pipelines[pipeline].dead_count > (s_pipelines[pipeline].capacity >> 1)) {
-            chitra_table_compact_pipeline(pipeline);
-        }
-    }
-
     if (pipeline == CHITRA_PIPELINE_TEXTURE) {
         chitra_texture_on_destroy(handle);
     }
@@ -275,8 +268,15 @@ void chitra_destroy(uint32_t handle) {
     uint16_t clip_id = (uint16_t)((slot->sort_key >> 18) & CHITRA_CLIP_ID_MASK);
     chitra_release_clip(clip_id);
 
-    /* Mark slot dead */
+    /* Mark slot dead FIRST so compaction does not treat it as alive */
     slot->vertex_meta = 0;
+
+    if (pipeline < CHITRA_PIPELINE_COUNT && count > 0) {
+        s_pipelines[pipeline].dead_count += count;
+        if (s_pipelines[pipeline].dead_count > (s_pipelines[pipeline].capacity >> 1)) {
+            chitra_table_compact_pipeline(pipeline);
+        }
+    }
 
     /* Push handle to LIFO recycler stack */
     ensure_free_list_capacity();
@@ -369,7 +369,7 @@ void chitra_table_compact_pipeline(uint8_t pipeline) {
     Chitra_PipelineData* pipe = &s_pipelines[pipeline];
     if (pipe->dead_count == 0) return;
 
-    uint32_t active_vertices = pipe->cursor - pipe->dead_count;
+    uint32_t active_vertices = pipe->cursor > pipe->dead_count ? (pipe->cursor - pipe->dead_count) : 0;
     uint32_t new_cap = (uint32_t)(active_vertices * 1.75f);
     if (new_cap < CHITRA_INIT_VERTEX_CAPACITY) new_cap = CHITRA_INIT_VERTEX_CAPACITY;
 
