@@ -6,13 +6,18 @@
  * Internal State: Dynamic Clip Registry & Recycler Stack
  * ========================================================================= */
 
-static Chitra_ClipRect* s_clip_table         = NULL;
-static uint32_t         s_clip_count         = 0;
-static uint32_t         s_clip_capacity      = 0;
+typedef struct {
+    Chitra_ClipRect rect;
+    uint32_t        ref_count;
+} Chitra_ClipEntry;
 
-static uint16_t*        s_clip_free_list     = NULL;
-static uint32_t         s_clip_free_count    = 0;
-static uint32_t         s_clip_free_capacity = 0;
+static Chitra_ClipEntry* s_clip_table         = NULL;
+static uint32_t          s_clip_count         = 0;
+static uint32_t          s_clip_capacity      = 0;
+
+static uint16_t*         s_clip_free_list     = NULL;
+static uint32_t          s_clip_free_count    = 0;
+static uint32_t          s_clip_free_capacity = 0;
 
 #define CHITRA_INIT_CLIP_CAPACITY 16
 
@@ -22,10 +27,13 @@ static uint32_t         s_clip_free_capacity = 0;
 
 void chitra_clip_init(void) {
     s_clip_capacity = CHITRA_INIT_CLIP_CAPACITY;
-    s_clip_table = (Chitra_ClipRect*)malloc(s_clip_capacity * sizeof(Chitra_ClipRect));
+    s_clip_table = (Chitra_ClipEntry*)malloc(s_clip_capacity * sizeof(Chitra_ClipEntry));
 
-    /* Slot 0 is always the default unclipped full-screen viewport */
-    s_clip_table[0] = (Chitra_ClipRect){0, 0, 32767, 32767};
+    /* Slot 0 is always the default unclipped full-screen viewport (pinned) */
+    s_clip_table[0] = (Chitra_ClipEntry){
+        .rect = {0, 0, 32767, 32767},
+        .ref_count = 1
+    };
     s_clip_count = 1;
 
     s_clip_free_capacity = CHITRA_INIT_CLIP_CAPACITY;
@@ -51,7 +59,10 @@ void chitra_clip_term(void) {
 
 void chitra_clip_clear(void) {
     /* Reset count, retaining slot 0 as default full-screen viewport */
-    s_clip_table[0] = (Chitra_ClipRect){0, 0, 32767, 32767};
+    s_clip_table[0] = (Chitra_ClipEntry){
+        .rect = {0, 0, 32767, 32767},
+        .ref_count = 1
+    };
     s_clip_count = 1;
     s_clip_free_count = 0;
 }
@@ -66,7 +77,7 @@ static void ensure_clip_capacity(uint32_t needed) {
         if (new_cap < needed) new_cap = needed + 16;
         if (new_cap > CHITRA_MAX_CLIPS) new_cap = CHITRA_MAX_CLIPS;
 
-        s_clip_table = (Chitra_ClipRect*)realloc(s_clip_table, new_cap * sizeof(Chitra_ClipRect));
+        s_clip_table = (Chitra_ClipEntry*)realloc(s_clip_table, new_cap * sizeof(Chitra_ClipEntry));
         s_clip_capacity = new_cap;
     }
 }
@@ -85,7 +96,7 @@ static void ensure_free_list_capacity(void) {
 }
 
 /* =========================================================================
- * Clip Registration, Mutation, and Destruction
+ * Clip Registration, Mutation, and Reference Counting
  * ========================================================================= */
 
 uint16_t chitra_register_clip(int x, int y, int w, int h) {
@@ -102,27 +113,42 @@ uint16_t chitra_register_clip(int x, int y, int w, int h) {
         id = (uint16_t)s_clip_count++;
     }
 
-    s_clip_table[id] = (Chitra_ClipRect){x, y, w, h};
+    s_clip_table[id] = (Chitra_ClipEntry){
+        .rect = {x, y, w, h},
+        .ref_count = 0
+    };
     return id;
 }
 
 void chitra_update_clip(uint16_t clip_id, int x, int y, int w, int h) {
     if (clip_id < s_clip_count) {
-        s_clip_table[clip_id] = (Chitra_ClipRect){x, y, w, h};
+        s_clip_table[clip_id].rect = (Chitra_ClipRect){x, y, w, h};
     }
 }
 
-void chitra_destroy_clip(uint16_t clip_id) {
+void chitra_retain_clip(uint16_t clip_id) {
     if (clip_id == 0 || clip_id >= s_clip_count) {
-        return; /* Slot 0 is default full-screen viewport and cannot be destroyed */
+        return; /* Slot 0 is unclipped viewport and pinned forever */
+    }
+    s_clip_table[clip_id].ref_count++;
+}
+
+void chitra_release_clip(uint16_t clip_id) {
+    if (clip_id == 0 || clip_id >= s_clip_count) {
+        return; /* Slot 0 is unclipped viewport and pinned forever */
     }
 
-    /* Zero out dead region */
-    s_clip_table[clip_id] = (Chitra_ClipRect){0, 0, 0, 0};
+    Chitra_ClipEntry* entry = &s_clip_table[clip_id];
+    if (entry->ref_count > 0) {
+        entry->ref_count--;
+    }
 
-    /* Recycle clip ID into LIFO recycler stack */
-    ensure_free_list_capacity();
-    s_clip_free_list[s_clip_free_count++] = clip_id;
+    /* Auto-delete when reference count reaches 0 */
+    if (entry->ref_count == 0) {
+        entry->rect = (Chitra_ClipRect){0, 0, 0, 0};
+        ensure_free_list_capacity();
+        s_clip_free_list[s_clip_free_count++] = clip_id;
+    }
 }
 
 uint16_t chitra_clip_intersect(uint16_t parent_id, int x, int y, int w, int h) {
@@ -151,9 +177,9 @@ uint16_t chitra_clip_intersect(uint16_t parent_id, int x, int y, int w, int h) {
 
 const Chitra_ClipRect* chitra_get_clip(uint16_t clip_id) {
     if (clip_id < s_clip_count) {
-        return &s_clip_table[clip_id];
+        return &s_clip_table[clip_id].rect;
     }
-    return &s_clip_table[0];
+    return &s_clip_table[0].rect;
 }
 
 Chitra_ClipRect chitra_clip_to_physical(const Chitra_ClipRect* logical, float dpi_scale) {

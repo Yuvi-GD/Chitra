@@ -1,5 +1,6 @@
 #include "chitra_table.h"
 #include "chitra_texture.h"
+#include "chitra_clip.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -270,6 +271,10 @@ void chitra_destroy(uint32_t handle) {
         chitra_texture_on_destroy(handle);
     }
 
+    /* Release clip reference */
+    uint16_t clip_id = (uint16_t)((slot->sort_key >> 18) & CHITRA_CLIP_ID_MASK);
+    chitra_release_clip(clip_id);
+
     /* Mark slot dead */
     slot->vertex_meta = 0;
 
@@ -307,9 +312,15 @@ void chitra_set_clip(uint32_t handle, uint16_t clip_id) {
     if (!chitra_is_alive(handle)) return;
     Chitra_CommandSlot* slot = &s_cmd_table.slots[handle];
 
-    uint64_t masked = slot->sort_key & ~(((uint64_t)CHITRA_CLIP_ID_MASK) << 18);
-    slot->sort_key = masked | (((uint64_t)(clip_id & CHITRA_CLIP_ID_MASK)) << 18);
-    s_table_dirty = true;
+    uint16_t old_clip = (uint16_t)((slot->sort_key >> 18) & CHITRA_CLIP_ID_MASK);
+    if (old_clip != clip_id) {
+        chitra_release_clip(old_clip);
+        chitra_retain_clip(clip_id);
+
+        uint64_t masked = slot->sort_key & ~(((uint64_t)CHITRA_CLIP_ID_MASK) << 18);
+        slot->sort_key = masked | (((uint64_t)(clip_id & CHITRA_CLIP_ID_MASK)) << 18);
+        s_table_dirty = true;
+    }
 }
 
 void chitra_set_texture(uint32_t handle, uint16_t texture_id) {
