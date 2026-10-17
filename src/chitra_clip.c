@@ -120,20 +120,20 @@ uint16_t chitra_register_clip(int x, int y, int w, int h) {
     return id;
 }
 
-void chitra_update_clip(uint16_t clip_id, int x, int y, int w, int h) {
+void chitra_clip_update(uint16_t clip_id, int x, int y, int w, int h) {
     if (clip_id < s_clip_count) {
         s_clip_table[clip_id].rect = (Chitra_ClipRect){x, y, w, h};
     }
 }
 
-void chitra_retain_clip(uint16_t clip_id) {
+void chitra_clip_retain(uint16_t clip_id) {
     if (clip_id == 0 || clip_id >= s_clip_count) {
         return; /* Slot 0 is unclipped viewport and pinned forever */
     }
     s_clip_table[clip_id].ref_count++;
 }
 
-void chitra_release_clip(uint16_t clip_id) {
+void chitra_clip_release(uint16_t clip_id) {
     if (clip_id == 0 || clip_id >= s_clip_count) {
         return; /* Slot 0 is unclipped viewport and pinned forever */
     }
@@ -169,6 +169,33 @@ uint16_t chitra_clip_intersect(uint16_t parent_id, int x, int y, int w, int h) {
     int final_h = y2 > y1 ? y2 - y1 : 0;
 
     return chitra_register_clip(x1, y1, final_w, final_h);
+}
+
+uint16_t chitra_clip_intersect_to(uint16_t existing_clip_id, uint16_t parent_id, int x, int y, int w, int h) {
+    const Chitra_ClipRect* p = chitra_get_clip(parent_id);
+
+    int x1 = x > p->x ? x : p->x;
+    int y1 = y > p->y ? y : p->y;
+
+    int x2_new = x + w;
+    int x2_par = p->x + p->w;
+    int y2_new = y + h;
+    int y2_par = p->y + p->h;
+
+    int x2 = x2_new < x2_par ? x2_new : x2_par;
+    int y2 = y2_new < y2_par ? y2_new : y2_par;
+
+    int final_w = x2 > x1 ? x2 - x1 : 0;
+    int final_h = y2 > y1 ? y2 - y1 : 0;
+
+    if (existing_clip_id == 0) {
+        /* First time: allocate a new clip slot */
+        return chitra_register_clip(x1, y1, final_w, final_h);
+    } else {
+        /* Subsequent frames: update the rect in-place, O(1), same ID returned */
+        chitra_clip_update(existing_clip_id, x1, y1, final_w, final_h);
+        return existing_clip_id;
+    }
 }
 
 /* =========================================================================

@@ -225,9 +225,11 @@ bool chitra_text_get_bounds(uint32_t handle, float* out_width, float* out_height
  * ========================================================================= */
 
 uint16_t chitra_register_clip(int x, int y, int w, int h);
-void     chitra_update_clip(uint16_t clip_id, int x, int y, int w, int h);
-void     chitra_release_clip(uint16_t clip_id);
+void     chitra_update_clip(uint32_t handle, int x, int y, int w, int h);
+void     chitra_release_clip(uint32_t handle);
 uint16_t chitra_clip_intersect(uint16_t parent_id, int x, int y, int w, int h);
+uint16_t chitra_clip_intersect_to(uint16_t existing_clip_id, uint16_t parent_id, int x, int y, int w, int h);
+uint16_t chitra_get_clip_id(uint32_t handle);
 
 #ifdef __cplusplus
 }

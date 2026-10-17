@@ -266,7 +266,7 @@ void chitra_destroy(uint32_t handle) {
 
     /* Release clip reference */
     uint16_t clip_id = (uint16_t)((slot->sort_key >> 18) & CHITRA_CLIP_ID_MASK);
-    chitra_release_clip(clip_id);
+    chitra_clip_release(clip_id);
 
     /* Mark slot dead FIRST so compaction does not treat it as alive */
     slot->vertex_meta = 0;
@@ -314,13 +314,28 @@ void chitra_set_clip(uint32_t handle, uint16_t clip_id) {
 
     uint16_t old_clip = (uint16_t)((slot->sort_key >> 18) & CHITRA_CLIP_ID_MASK);
     if (old_clip != clip_id) {
-        chitra_release_clip(old_clip);
-        chitra_retain_clip(clip_id);
+        chitra_clip_release(old_clip);
+        chitra_clip_retain(clip_id);
 
         uint64_t masked = slot->sort_key & ~(((uint64_t)CHITRA_CLIP_ID_MASK) << 18);
         slot->sort_key = masked | (((uint64_t)(clip_id & CHITRA_CLIP_ID_MASK)) << 18);
         s_table_dirty = true;
     }
+}
+
+void chitra_update_clip(uint32_t handle, int x, int y, int w, int h) {
+    if (!chitra_is_alive(handle)) return;
+    uint16_t clip_id = chitra_get_clip_id(handle);
+    if (clip_id != 0) {
+        chitra_clip_update(clip_id, x, y, w, h);
+        s_table_dirty = true;
+    }
+}
+
+void chitra_release_clip(uint32_t handle) {
+    if (!chitra_is_alive(handle)) return;
+    /* Clearing clip to 0 updates the sort key to 0 AND releases ref_count on the clip slot */
+    chitra_set_clip(handle, 0);
 }
 
 void chitra_set_texture(uint32_t handle, uint16_t texture_id) {

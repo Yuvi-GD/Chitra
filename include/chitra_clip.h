@@ -14,10 +14,11 @@ void chitra_clip_clear(void);
 
 /* Clip Registration, Mutation, and Reference Counting */
 uint16_t chitra_register_clip(int x, int y, int w, int h);
-void     chitra_update_clip(uint16_t clip_id, int x, int y, int w, int h);
-void     chitra_retain_clip(uint16_t clip_id);
-void     chitra_release_clip(uint16_t clip_id);
+void     chitra_clip_update(uint16_t clip_id, int x, int y, int w, int h);
+void     chitra_clip_retain(uint16_t clip_id);
+void     chitra_clip_release(uint16_t clip_id);
 uint16_t chitra_clip_intersect(uint16_t parent_id, int x, int y, int w, int h);
+uint16_t chitra_clip_intersect_to(uint16_t existing_clip_id, uint16_t parent_id, int x, int y, int w, int h);
 
 /* Query & High-DPI Coordinate Mapping */
 const Chitra_ClipRect* chitra_get_clip(uint16_t clip_id);
