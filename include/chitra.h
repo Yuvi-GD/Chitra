@@ -216,6 +216,7 @@ bool chitra_text_set_color(uint32_t handle, uint32_t color);
 bool chitra_text_set_pos(uint32_t handle, float x, float y);
 bool chitra_text_set_opacity(uint32_t handle, float opacity);
 bool chitra_text_set_rotation(uint32_t handle, float origin_x, float origin_y, float angle_rad);
+bool chitra_text_set_scale(uint32_t handle, float origin_x, float origin_y, float scale_x, float scale_y);
 bool chitra_text_set_letter_spacing(uint32_t handle, float spacing);
 bool chitra_text_get_bounds(uint32_t handle, float* out_width, float* out_height);
 

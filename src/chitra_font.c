@@ -89,7 +89,7 @@ static void font_term(void) {
 }
 
 static int font_load_font(const char* name, const char* path) {
-    if (!s_fons) return -1;
+    if (!s_fons || !path) return -1;
     return fonsAddFont(s_fons, name, path);
 }
 
@@ -99,12 +99,13 @@ static void font_unload_font(int font_id) {
 }
 
 static void font_get_metrics(int font_id, float size, float* ascender, float* descender, float* line_height) {
-    if (!s_fons || font_id == FONS_INVALID) {
+    if (!s_fons) {
         if (ascender)    *ascender = 0.0f;
         if (descender)   *descender = 0.0f;
         if (line_height) *line_height = 0.0f;
         return;
     }
+    if (font_id < 0) font_id = 0;
 
     fonsSetFont(s_fons, font_id);
     fonsSetSize(s_fons, size);
@@ -116,11 +117,12 @@ static void font_get_metrics(int font_id, float size, float* ascender, float* de
  * ========================================================================= */
 
 static void font_measure_text(int font_id, float size, const char* text, float* out_width, float* out_height) {
-    if (!s_fons || font_id == FONS_INVALID || !text) {
+    if (!s_fons || !text) {
         if (out_width)  *out_width = 0.0f;
         if (out_height) *out_height = 0.0f;
         return;
     }
+    if (font_id < 0) font_id = 0;
 
     fonsSetFont(s_fons, font_id);
     fonsSetSize(s_fons, size);
@@ -137,11 +139,12 @@ static void font_measure_text(int font_id, float size, const char* text, float* 
 }
 
 static void font_measure_text_wrapped(int font_id, float size, const char* text, float max_width, float* out_width, float* out_height) {
-    if (!s_fons || font_id == FONS_INVALID || !text) {
+    if (!s_fons || !text) {
         if (out_width)  *out_width = 0.0f;
         if (out_height) *out_height = 0.0f;
         return;
     }
+    if (font_id < 0) font_id = 0;
 
     fonsSetFont(s_fons, font_id);
     fonsSetSize(s_fons, size);
@@ -204,20 +207,35 @@ static void font_measure_text_wrapped(int font_id, float size, const char* text,
  * Single-Pass Text Quad Generation into Central Staging Buffer
  * ========================================================================= */
 
+static inline uint32_t count_text_glyphs(const char* text) {
+    if (!text) return 0;
+    uint32_t count = 0;
+    const unsigned char* p = (const unsigned char*)text;
+    while (*p) {
+        /* Count non-whitespace UTF-8 codepoints (skip UTF-8 continuation bytes 10xxxxxx) */
+        if (*p > ' ' && (*p < 0x80 || (*p & 0xC0) != 0x80)) {
+            count++;
+        }
+        p++;
+    }
+    return count;
+}
+
 static bool emit_text_quads(uint32_t handle, int font_id, float size, const char* text, float max_width, float x, float y) {
-    if (!s_fons || font_id == FONS_INVALID || !text || !chitra_is_alive(handle)) {
+    if (!s_fons || !text || !chitra_is_alive(handle)) {
         return false;
     }
+    if (font_id < 0) font_id = 0;
 
-    int str_len = (int)strlen(text);
-    if (str_len == 0) {
+    uint32_t glyph_count = count_text_glyphs(text);
+    if (glyph_count == 0) {
         chitra_table_alloc_vertices(CHITRA_PIPELINE_TEXT, handle, 0);
         return true;
     }
 
-    /* Reserve upper bound of vertices (at most 4 vertices per char) */
-    uint32_t max_vertices = (uint32_t)str_len * 4;
-    Chitra_TextVertex* v = (Chitra_TextVertex*)chitra_table_alloc_vertices(CHITRA_PIPELINE_TEXT, handle, max_vertices);
+    /* Allocate exact vertex count once: 4 vertices per non-whitespace glyph */
+    uint32_t total_vertices = glyph_count * 4;
+    Chitra_TextVertex* v = (Chitra_TextVertex*)chitra_table_alloc_vertices(CHITRA_PIPELINE_TEXT, handle, total_vertices);
     if (!v) return false;
 
     /* Associate Font Atlas Texture ID with element handle */
@@ -238,7 +256,7 @@ static bool emit_text_quads(uint32_t handle, int font_id, float size, const char
     const char* p = text;
     const char* word_start = text;
 
-    while (*p && quad_idx < str_len) {
+    while (*p && (uint32_t)quad_idx < glyph_count) {
         while (*p && *p != ' ' && *p != '\n') p++;
 
         bool is_newline = (*p == '\n');
@@ -262,7 +280,7 @@ static bool emit_text_quads(uint32_t handle, int font_id, float size, const char
             fonsTextIterInit(s_fons, &iter, cx, cy, word_buf, NULL);
             FONSquad q;
 
-            while (fonsTextIterNext(s_fons, &iter, &q) && quad_idx < str_len) {
+            while (fonsTextIterNext(s_fons, &iter, &q) && (uint32_t)quad_idx < glyph_count) {
                 int base = quad_idx * 4;
 
                 /* Top-Left */
@@ -303,9 +321,10 @@ static bool emit_text_quads(uint32_t handle, int font_id, float size, const char
         word_start = p;
     }
 
-    /* In-place shrink to exact emitted vertex count (zeros dead hole overhead) */
-    uint32_t actual_vertices = (uint32_t)quad_idx * 4;
-    chitra_table_alloc_vertices(CHITRA_PIPELINE_TEXT, handle, actual_vertices);
+    /* Zero any unused tail quads to keep geometry clean without reallocating */
+    for (uint32_t i = (uint32_t)quad_idx; i < glyph_count; i++) {
+        memset(&v[i * 4], 0, 4 * sizeof(Chitra_TextVertex));
+    }
 
     chitra_table_mark_dirty();
     return true;
@@ -388,6 +407,23 @@ static bool font_set_rotation(uint32_t handle, float origin_x, float origin_y, f
         float py = v[i].pos[1] - origin_y;
         v[i].pos[0] = origin_x + (px * c - py * s);
         v[i].pos[1] = origin_y + (px * s + py * c);
+    }
+
+    chitra_table_mark_dirty();
+    return true;
+}
+
+static bool font_set_scale(uint32_t handle, float origin_x, float origin_y, float scale_x, float scale_y) {
+    uint8_t pipe;
+    uint32_t count;
+    Chitra_TextVertex* v = (Chitra_TextVertex*)chitra_table_get_vertices(handle, &pipe, &count);
+    if (!v || pipe != CHITRA_PIPELINE_TEXT || count == 0) return false;
+
+    for (uint32_t i = 0; i < count; i++) {
+        float px = v[i].pos[0] - origin_x;
+        float py = v[i].pos[1] - origin_y;
+        v[i].pos[0] = origin_x + px * scale_x;
+        v[i].pos[1] = origin_y + py * scale_y;
     }
 
     chitra_table_mark_dirty();
@@ -477,6 +513,7 @@ static const Chitra_Font_API s_api = {
     .set_pos               = font_set_pos,
     .set_opacity           = font_set_opacity,
     .set_rotation          = font_set_rotation,
+    .set_scale             = font_set_scale,
     .set_letter_spacing    = font_set_letter_spacing,
     .get_bounds            = font_get_bounds,
     .prepare               = font_prepare,

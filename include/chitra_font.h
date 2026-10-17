@@ -28,6 +28,7 @@ typedef struct {
     bool (*set_pos)(uint32_t handle, float x, float y);
     bool (*set_opacity)(uint32_t handle, float opacity);
     bool (*set_rotation)(uint32_t handle, float origin_x, float origin_y, float angle_rad);
+    bool (*set_scale)(uint32_t handle, float origin_x, float origin_y, float scale_x, float scale_y);
     bool (*set_letter_spacing)(uint32_t handle, float spacing);
     bool (*get_bounds)(uint32_t handle, float* out_width, float* out_height);
 

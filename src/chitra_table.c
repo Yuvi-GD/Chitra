@@ -158,7 +158,7 @@ static void ensure_vertex_capacity(Chitra_PipelineData* pipe, uint32_t needed) {
  * ========================================================================= */
 
 void* chitra_table_alloc_vertices(uint8_t pipeline, uint32_t handle, uint32_t count) {
-    if (handle >= s_cmd_table.count || pipeline >= CHITRA_PIPELINE_COUNT) return NULL;
+    if (count == 0 || handle >= s_cmd_table.count || pipeline >= CHITRA_PIPELINE_COUNT) return NULL;
     Chitra_CommandSlot* slot = &s_cmd_table.slots[handle];
     if (!chitra_slot_is_alive(slot)) return NULL;
 
@@ -166,24 +166,21 @@ void* chitra_table_alloc_vertices(uint8_t pipeline, uint32_t handle, uint32_t co
     uint32_t old_count = chitra_slot_vertex_count(slot);
 
     if (count <= old_count) {
-        /* In-place shrink / overwrite: mark trailing vertices as dead */
         pipe->dead_count += (old_count - count);
-        chitra_slot_set_vertex_count(slot, count);
-        s_table_dirty = true;
-        return (uint8_t*)pipe->data + (slot->start_vertex_index * pipe->stride);
-    }
-
-    /* Growth: abandon old geometry as dead hole, append at cursor */
-    if (old_count > 0) {
+    } else {
         pipe->dead_count += old_count;
+        ensure_vertex_capacity(pipe, count);
+        slot->start_vertex_index = pipe->cursor;
+        pipe->cursor += count;
     }
 
-    ensure_vertex_capacity(pipe, count);
-    slot->start_vertex_index = pipe->cursor;
     chitra_slot_set_vertex_count(slot, count);
-    pipe->cursor += count;
-
     s_table_dirty = true;
+
+    if (pipe->dead_count > (pipe->capacity >> 1)) {
+        chitra_table_compact_pipeline(pipeline);
+    }
+
     return (uint8_t*)pipe->data + (slot->start_vertex_index * pipe->stride);
 }
 
@@ -265,6 +262,9 @@ void chitra_destroy(uint32_t handle) {
 
     if (pipeline < CHITRA_PIPELINE_COUNT && count > 0) {
         s_pipelines[pipeline].dead_count += count;
+        if (s_pipelines[pipeline].dead_count > (s_pipelines[pipeline].capacity >> 1)) {
+            chitra_table_compact_pipeline(pipeline);
+        }
     }
 
     if (pipeline == CHITRA_PIPELINE_TEXTURE) {
@@ -402,14 +402,6 @@ void chitra_table_compact_pipeline(uint8_t pipeline) {
     s_table_dirty = true;
 }
 
-void chitra_table_check_compaction(uint8_t pipeline, bool is_idle) {
-    if (pipeline >= CHITRA_PIPELINE_COUNT) return;
-    Chitra_PipelineData* pipe = &s_pipelines[pipeline];
-
-    if (is_idle && pipe->dead_count > (pipe->capacity >> 1)) {
-        chitra_table_compact_pipeline(pipeline);
-    }
-}
 
 /* =========================================================================
  * Accessors

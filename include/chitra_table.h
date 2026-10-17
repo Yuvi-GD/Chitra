@@ -100,7 +100,6 @@ void*                      chitra_table_get_vertices(uint32_t handle, uint8_t* o
 const Chitra_PipelineData* chitra_table_get_pipeline(uint8_t pipeline);
 
 /* Central Compaction and Garbage Collection */
-void chitra_table_check_compaction(uint8_t pipeline, bool is_idle);
 void chitra_table_compact_pipeline(uint8_t pipeline);
 
 /* Visual State Modifiers */
