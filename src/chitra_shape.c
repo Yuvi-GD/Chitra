@@ -1,5 +1,6 @@
 #include "chitra_shape.h"
 #include "chitra_table.h"
+#include <math.h>
 
 /* =========================================================================
  * Shape Primitive Setters (Pure O(1) Direct RAM Writes)
@@ -98,4 +99,47 @@ bool chitra_rect_set_border_color(uint32_t handle, uint32_t border_color) {
 bool chitra_rect_set_color(uint32_t handle, uint32_t fill_color, uint32_t border_color) {
     if (!chitra_rect_set_fill_color(handle, fill_color)) return false;
     return chitra_rect_set_border_color(handle, border_color);
+}
+
+bool chitra_rect_set_opacity(uint32_t handle, float opacity) {
+    uint8_t pipe;
+    uint32_t count;
+    Chitra_ShapeVertex* v = (Chitra_ShapeVertex*)chitra_table_get_vertices(handle, &pipe, &count);
+    if (!v || pipe != CHITRA_PIPELINE_SHAPE || count != 4) return false;
+
+    if (opacity < 0.0f) opacity = 0.0f;
+    if (opacity > 1.0f) opacity = 1.0f;
+
+    for (int i = 0; i < 4; i++) {
+        uint32_t fc = v[i].fill_color;
+        uint8_t fa = (uint8_t)(((fc >> 24) & 0xFF) * opacity);
+        v[i].fill_color = (fc & 0x00FFFFFF) | (((uint32_t)fa) << 24);
+
+        uint32_t bc = v[i].border_color;
+        uint8_t ba = (uint8_t)(((bc >> 24) & 0xFF) * opacity);
+        v[i].border_color = (bc & 0x00FFFFFF) | (((uint32_t)ba) << 24);
+    }
+
+    chitra_table_mark_dirty();
+    return true;
+}
+
+bool chitra_rect_set_rotation(uint32_t handle, float origin_x, float origin_y, float angle_rad) {
+    uint8_t pipe;
+    uint32_t count;
+    Chitra_ShapeVertex* v = (Chitra_ShapeVertex*)chitra_table_get_vertices(handle, &pipe, &count);
+    if (!v || pipe != CHITRA_PIPELINE_SHAPE || count != 4) return false;
+
+    float c = cosf(angle_rad);
+    float s = sinf(angle_rad);
+
+    for (int i = 0; i < 4; i++) {
+        float px = v[i].pos[0] - origin_x;
+        float py = v[i].pos[1] - origin_y;
+        v[i].pos[0] = origin_x + (px * c - py * s);
+        v[i].pos[1] = origin_y + (px * s + py * c);
+    }
+
+    chitra_table_mark_dirty();
+    return true;
 }

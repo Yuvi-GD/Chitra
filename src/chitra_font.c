@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -354,6 +355,45 @@ static bool font_set_pos(uint32_t handle, float x, float y) {
     return true;
 }
 
+static bool font_set_opacity(uint32_t handle, float opacity) {
+    uint8_t pipe;
+    uint32_t count;
+    Chitra_TextVertex* v = (Chitra_TextVertex*)chitra_table_get_vertices(handle, &pipe, &count);
+    if (!v || pipe != CHITRA_PIPELINE_TEXT || count == 0) return false;
+
+    if (opacity < 0.0f) opacity = 0.0f;
+    if (opacity > 1.0f) opacity = 1.0f;
+
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t col = v[i].color;
+        uint8_t a = (uint8_t)(((col >> 24) & 0xFF) * opacity);
+        v[i].color = (col & 0x00FFFFFF) | (((uint32_t)a) << 24);
+    }
+
+    chitra_table_mark_dirty();
+    return true;
+}
+
+static bool font_set_rotation(uint32_t handle, float origin_x, float origin_y, float angle_rad) {
+    uint8_t pipe;
+    uint32_t count;
+    Chitra_TextVertex* v = (Chitra_TextVertex*)chitra_table_get_vertices(handle, &pipe, &count);
+    if (!v || pipe != CHITRA_PIPELINE_TEXT || count == 0) return false;
+
+    float c = cosf(angle_rad);
+    float s = sinf(angle_rad);
+
+    for (uint32_t i = 0; i < count; i++) {
+        float px = v[i].pos[0] - origin_x;
+        float py = v[i].pos[1] - origin_y;
+        v[i].pos[0] = origin_x + (px * c - py * s);
+        v[i].pos[1] = origin_y + (px * s + py * c);
+    }
+
+    chitra_table_mark_dirty();
+    return true;
+}
+
 static bool font_set_letter_spacing(uint32_t handle, float spacing) {
     uint8_t pipe;
     uint32_t count;
@@ -435,6 +475,8 @@ static const Chitra_Font_API s_api = {
     .set_text_wrapped      = font_set_text_wrapped,
     .set_color             = font_set_color,
     .set_pos               = font_set_pos,
+    .set_opacity           = font_set_opacity,
+    .set_rotation          = font_set_rotation,
     .set_letter_spacing    = font_set_letter_spacing,
     .get_bounds            = font_get_bounds,
     .prepare               = font_prepare,

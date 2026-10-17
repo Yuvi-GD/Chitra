@@ -194,6 +194,8 @@ bool chitra_rect_set_border(uint32_t handle, float border);
 bool chitra_rect_set_fill_color(uint32_t handle, uint32_t fill_color);
 bool chitra_rect_set_border_color(uint32_t handle, uint32_t border_color);
 bool chitra_rect_set_color(uint32_t handle, uint32_t fill_color, uint32_t border_color);
+bool chitra_rect_set_opacity(uint32_t handle, float opacity);
+bool chitra_rect_set_rotation(uint32_t handle, float origin_x, float origin_y, float angle_rad);
 
 /* =========================================================================
  * Typography API
@@ -212,6 +214,8 @@ bool chitra_text_set_wrapped(uint32_t handle, int font_id, float size, const cha
 /* In-Place Direct Vertex Operations (Pure RAM, 0 string lookup, 0 font engine cost) */
 bool chitra_text_set_color(uint32_t handle, uint32_t color);
 bool chitra_text_set_pos(uint32_t handle, float x, float y);
+bool chitra_text_set_opacity(uint32_t handle, float opacity);
+bool chitra_text_set_rotation(uint32_t handle, float origin_x, float origin_y, float angle_rad);
 bool chitra_text_set_letter_spacing(uint32_t handle, float spacing);
 bool chitra_text_get_bounds(uint32_t handle, float* out_width, float* out_height);
 

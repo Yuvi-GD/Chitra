@@ -26,6 +26,8 @@ typedef struct {
     /* In-place vertex operations (O(1) in RAM, 0 string lookup, 0 font engine cost) */
     bool (*set_color)(uint32_t handle, uint32_t color);
     bool (*set_pos)(uint32_t handle, float x, float y);
+    bool (*set_opacity)(uint32_t handle, float opacity);
+    bool (*set_rotation)(uint32_t handle, float origin_x, float origin_y, float angle_rad);
     bool (*set_letter_spacing)(uint32_t handle, float spacing);
     bool (*get_bounds)(uint32_t handle, float* out_width, float* out_height);
 

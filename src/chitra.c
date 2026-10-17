@@ -211,6 +211,14 @@ bool chitra_text_set_pos(uint32_t handle, float x, float y) {
     return chitra_font_get_api()->set_pos(handle, x, y);
 }
 
+bool chitra_text_set_opacity(uint32_t handle, float opacity) {
+    return chitra_font_get_api()->set_opacity(handle, opacity);
+}
+
+bool chitra_text_set_rotation(uint32_t handle, float origin_x, float origin_y, float angle_rad) {
+    return chitra_font_get_api()->set_rotation(handle, origin_x, origin_y, angle_rad);
+}
+
 bool chitra_text_set_letter_spacing(uint32_t handle, float spacing) {
     return chitra_font_get_api()->set_letter_spacing(handle, spacing);
 }
