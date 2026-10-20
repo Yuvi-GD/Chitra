@@ -12,6 +12,6 @@ typedef struct {
 } Chitra_HAL_API;
 
 /* Backend registration (implemented by whatever backend is compiled) */
-const Chitra_HAL_API* chitra_hal_get_api(void);
+const Chitra_HAL_API* chitra_hal_api(void);
 
 #endif // CHITRA_HAL_H

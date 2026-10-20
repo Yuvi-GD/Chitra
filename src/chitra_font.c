@@ -33,14 +33,14 @@ static int fons_render_create(void* user_ptr, int width, int height) {
     s_atlas_height = height;
     
     /* Create an empty dynamic texture for the atlas */
-    s_atlas_texture_id = chitra_rhi_get_api()->create_texture(width, height);
+    s_atlas_texture_id = chitra_rhi_api()->create_texture(width, height);
     return s_atlas_texture_id != 0 ? 1 : 0;
 }
 
 static int fons_render_resize(void* user_ptr, int width, int height) {
     /* Destroy old texture and create a new one */
     if (s_atlas_texture_id != 0) {
-        chitra_rhi_get_api()->destroy_texture(s_atlas_texture_id);
+        chitra_rhi_api()->destroy_texture(s_atlas_texture_id);
     }
     return fons_render_create(user_ptr, width, height);
 }
@@ -55,7 +55,7 @@ static void fons_render_draw(void* user_ptr, const float* verts, const float* tc
 
 static void fons_render_delete(void* user_ptr) {
     if (s_atlas_texture_id != 0) {
-        chitra_rhi_get_api()->destroy_texture(s_atlas_texture_id);
+        chitra_rhi_api()->destroy_texture(s_atlas_texture_id);
         s_atlas_texture_id = 0;
     }
 }
@@ -479,7 +479,7 @@ static void font_prepare(void) {
         if (s_atlas_texture_id != 0) {
             int width, height;
             const unsigned char* data = fonsGetTextureData(s_fons, &width, &height);
-            chitra_rhi_get_api()->update_texture(s_atlas_texture_id, data, width, height);
+            chitra_rhi_api()->update_texture(s_atlas_texture_id, data, width, height);
         }
     }
 }
@@ -513,6 +513,6 @@ static const Chitra_Font_API s_api = {
     .get_atlas_texture_id  = font_get_atlas_texture_id
 };
 
-const Chitra_Font_API* chitra_font_get_api(void) {
+const Chitra_Font_API* chitra_font_api(void) {
     return &s_api;
 }

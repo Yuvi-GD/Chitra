@@ -91,6 +91,7 @@ typedef struct Chitra_Config {
     int         target_fps; /* 0 = VSync, >0 = manual cap with high-res timer */
     void        (*on_init)(void);
     void        (*on_frame)(void);
+    void        (*on_post_frame)(void);
     void        (*on_event)(const Chitra_InputEvent* event);
     void        (*on_cleanup)(void);
 } Chitra_Config;
@@ -100,7 +101,8 @@ void chitra_run(const Chitra_Config* config);
 void chitra_quit(void);
 
 /* Embedded execution loop */
-void chitra_init(int initial_width, int initial_height);
+void chitra_init(void);
+void chitra_frame(void);
 void chitra_begin_frame(int framebuffer_w, int framebuffer_h, float dpi_scale);
 void chitra_render(void);
 void chitra_end_frame(void);
@@ -108,6 +110,13 @@ void chitra_cleanup(void);
 
 /* Frame Pacing */
 void chitra_mark_dirty(void);
+
+/* Window Dimensions & Resolution */
+int  chitra_width(void);
+int  chitra_height(void);
+void chitra_set_resolution(int res_x, int res_y);
+void chitra_get_resolution(int* out_x, int* out_y);
+void chitra_map_pointer(float in_x, float in_y, float* out_x, float* out_y);
 
 /* =========================================================================
  * Reservation-First Element Lifecycle

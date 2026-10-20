@@ -37,6 +37,6 @@ typedef struct {
     uint16_t (*get_atlas_texture_id)(void);
 } Chitra_Font_API;
 
-const Chitra_Font_API* chitra_font_get_api(void);
+const Chitra_Font_API* chitra_font_api(void);
 
 #endif /* CHITRA_FONT_H */

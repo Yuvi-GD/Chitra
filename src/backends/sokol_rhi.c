@@ -62,8 +62,7 @@ static struct {
  * Subsystem Initialization
  * ========================================================================= */
 
-static void rhi_init(const Chitra_Config* config) {
-    (void)config;
+static void rhi_init(void) {
 
     /* Compact resource pools and 64KB uniform ring for minimal memory footprint */
     sg_desc desc = {
@@ -493,6 +492,6 @@ void chitra_rhi_set_api(const Chitra_RHI_API* api) {
     s_custom_rhi = api;
 }
 
-const Chitra_RHI_API* chitra_rhi_get_api(void) {
+const Chitra_RHI_API* chitra_rhi_api(void) {
     return s_custom_rhi ? s_custom_rhi : &s_api;
 }

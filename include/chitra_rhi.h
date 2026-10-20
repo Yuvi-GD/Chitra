@@ -13,7 +13,7 @@
 struct Chitra_Config;
 
 typedef struct {
-    void (*init)(const struct Chitra_Config* config);
+    void (*init)(void);
     void (*begin_frame)(int width, int height);
 
     /* Upload per-pipeline vertex data to GPU VRAM */
@@ -42,6 +42,6 @@ typedef struct {
 
 /* Backend registration */
 void chitra_rhi_set_api(const Chitra_RHI_API* api);
-const Chitra_RHI_API* chitra_rhi_get_api(void);
+const Chitra_RHI_API* chitra_rhi_api(void);
 
 #endif /* CHITRA_RHI_H */

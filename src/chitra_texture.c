@@ -73,7 +73,7 @@ void chitra_texture_init(void) {
     stbrp_init_target(&s_active_atlas.packer, CHITRA_ATLAS_SIZE, CHITRA_ATLAS_SIZE, s_active_atlas.nodes, CHITRA_ATLAS_NODES);
 
     /* 2. Create initial GPU atlas texture */
-    const Chitra_RHI_API* rhi = chitra_rhi_get_api();
+    const Chitra_RHI_API* rhi = chitra_rhi_api();
     if (rhi && rhi->create_texture_rgba) {
         s_active_atlas.texture_id = rhi->create_texture_rgba(CHITRA_ATLAS_SIZE, CHITRA_ATLAS_SIZE);
         ensure_tex_meta_capacity(s_active_atlas.texture_id);
@@ -84,7 +84,7 @@ void chitra_texture_init(void) {
 }
 
 void chitra_texture_term(void) {
-    const Chitra_RHI_API* rhi = chitra_rhi_get_api();
+    const Chitra_RHI_API* rhi = chitra_rhi_api();
     if (rhi && rhi->destroy_texture && s_tex_meta) {
         for (uint16_t id = 0; id < s_tex_meta_capacity; id++) {
             if (s_tex_meta[id].ref_count > 0 || (s_tex_meta[id].is_atlas && id == s_active_atlas.texture_id)) {
@@ -150,7 +150,7 @@ void chitra_texture_on_destroy(uint32_t handle) {
     Chitra_TextureMeta* meta = &s_tex_meta[tex_id];
     if (meta->is_evacuating) return; /* RE-ENTRANCY GUARD: prevent infinite recursion! */
 
-    const Chitra_RHI_API* rhi = chitra_rhi_get_api();
+    const Chitra_RHI_API* rhi = chitra_rhi_api();
     if (!rhi) return;
 
     /* Decrement reference count */
@@ -217,7 +217,7 @@ bool chitra_texture_load(uint32_t handle, int width, int height, const void* rgb
     Chitra_TextVertex* v = (Chitra_TextVertex*)chitra_table_get_vertices(handle, &pipe, &count);
     if (!v || pipe != CHITRA_PIPELINE_TEXTURE || count != 4) return false;
 
-    const Chitra_RHI_API* rhi = chitra_rhi_get_api();
+    const Chitra_RHI_API* rhi = chitra_rhi_api();
     if (!rhi) return false;
 
     /* Rule 1: Large Images (> 512x512) -> Standalone GPU Texture */

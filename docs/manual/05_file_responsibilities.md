@@ -105,7 +105,7 @@ Headers located in `include/` define the API contracts across the system. They c
   } Chitra_RHI_API;
 
   void chitra_rhi_set_api(const Chitra_RHI_API* api);
-  const Chitra_RHI_API* chitra_rhi_get_api(void);
+  const Chitra_RHI_API* chitra_rhi_api(void);
   ```
 * **Responsibility:** Abstracts all GPU driver operations (pipeline binding, transient vertex/index buffer uploading, hardware scissor configuration, draw dispatch, dynamic texture pool, and sub-rect VRAM updates). The core engine interacts exclusively with this interface. Supports runtime RHI registration (`chitra_rhi_set_api`) for mock headless unit testing.
 
@@ -155,7 +155,7 @@ The files in `src/` contain the platform-independent core logic of Chitra. They 
 ### A. [src/chitra.c](../../src/chitra.c)
 * **Module:** Engine Coordinator & Public Router
 * **Responsibilities:**
-  1. **Backend Discovery:** Retrieves registered vtables via `chitra_hal_get_api()` and `chitra_rhi_get_api()`.
+  1. **Backend Discovery:** Retrieves registered vtables via `chitra_hal_api()` and `chitra_rhi_api()`.
   2. **Application Lifecycle:** Coordinates engine startup via `chitra_run()` or embedded `chitra_init()` / `chitra_render()`.
   3. **Internal Synchronization:** Exposes `chitra_internal_init()`, `chitra_internal_prepare()`, and `chitra_internal_term()` invoked by HAL frame hooks.
   4. **API Routing:** Forwards high-level calls to internal subsystems (`chitra_table`, `chitra_shape`, `chitra_texture`, `chitra_font`, `chitra_batch`, `chitra_clip`).

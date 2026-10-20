@@ -23,20 +23,23 @@
 
 static sapp_desc      s_desc            = {0};
 static Chitra_Config  s_config          = {0};
-static int            s_last_w          = 0;
-static int            s_last_h          = 0;
+static int            s_width           = 0;
+static int            s_height          = 0;
 static int            s_dirty_countdown = 3;
 static double         s_target_ms       = 0.0;
 static uint64_t       s_last_frame_time = 0;
 
+int chitra_width(void) {
+    return (s_width > 0) ? s_width : sapp_width();
+}
+
+int chitra_height(void) {
+    return (s_height > 0) ? s_height : sapp_height();
+}
+
 #ifdef _WIN32
 static HANDLE s_waitable_timer = NULL;
 #endif
-
-extern void chitra_internal_init(void);
-extern void chitra_internal_prepare(void);
-extern void chitra_internal_term(void);
-extern void chitra_render(void);
 
 /* -------------------------------------------------------------------------
  * chitra_sleep_ms
@@ -118,36 +121,34 @@ static void sokol_init(void) {
     }
 #endif
 
-    chitra_rhi_get_api()->init(&s_config);
-    chitra_internal_init();
+    s_width = sapp_width();
+    s_height = sapp_height();
+    chitra_init();
     if (s_config.on_init) s_config.on_init();
 }
 
 static void sokol_frame(void) {
     int w = sapp_width();
     int h = sapp_height();
-    if (w == 0 || h == 0) return;
+    if (w <= 0 || h <= 0) return;
 
     /* Detect resize and mark dirty */
-    if (w != s_last_w || h != s_last_h) {
+    if (w != s_width || h != s_height) {
+        s_width = w;
+        s_height = h;
         chitra_table_mark_dirty();
-        s_last_w = w;
-        s_last_h = h;
     }
 
-    /* Let the app update its command list */
+    /* 1. Pre-Frame: Let the app update state & command list */
     if (s_config.on_frame) s_config.on_frame();
 
-    /* If commands changed, schedule 3 draw frames for triple-buffering presentation. */
+    /* 2. Main-Frame: Render scene if dirty */
     if (chitra_table_is_dirty()) {
         s_dirty_countdown = 3;
     }
 
     if (s_dirty_countdown > 0) {
-        chitra_internal_prepare();
-        chitra_rhi_get_api()->begin_frame(w, h);
-        chitra_render();
-        chitra_rhi_get_api()->end_frame();
+        chitra_frame();
         s_dirty_countdown--;
     } else {
         /* Scene is visually unchanged.
@@ -158,6 +159,9 @@ static void sokol_frame(void) {
         }
     }
 
+    /* 3. Post-Frame: App post-frame callback + HAL frame pacing */
+    if (s_config.on_post_frame) s_config.on_post_frame();
+    
     /* Manual frame cap (target_fps > 0, VSync disabled).
      * Sleep precisely until the next frame deadline. */
     if (s_target_ms > 0.0) {
@@ -168,8 +172,8 @@ static void sokol_frame(void) {
 }
 
 static void sokol_cleanup(void) {
-    chitra_internal_term();
-    chitra_rhi_get_api()->cleanup();
+    if (s_config.on_cleanup) s_config.on_cleanup();
+    chitra_cleanup();
 #ifdef _WIN32
     if (s_waitable_timer) {
         CloseHandle(s_waitable_timer);
@@ -179,17 +183,11 @@ static void sokol_cleanup(void) {
 }
 
 static void sokol_event(const sapp_event* e) {
-    if (e->type == SAPP_EVENTTYPE_RESIZED) {
-        chitra_table_mark_dirty();
-        s_dirty_countdown = 3;
-    }
-    
     if (s_config.on_event) {
         Chitra_InputEvent ce = {0};
-        ce.mouse_x = e->mouse_x;
-        ce.mouse_y = e->mouse_y;
-        ce.window_width = e->window_width;
-        ce.window_height = e->window_height;
+        chitra_map_pointer(e->mouse_x, e->mouse_y, &ce.mouse_x, &ce.mouse_y);
+        ce.window_width = chitra_width();
+        ce.window_height = chitra_height();
         
         switch (e->type) {
             case SAPP_EVENTTYPE_MOUSE_MOVE:   ce.type = CHITRA_EVENT_MOUSE_MOVE; break;
@@ -252,6 +250,6 @@ static const Chitra_HAL_API s_api = {
     .quit = hal_quit
 };
 
-const Chitra_HAL_API* chitra_hal_get_api(void) {
+const Chitra_HAL_API* chitra_hal_api(void) {
     return &s_api;
 }
