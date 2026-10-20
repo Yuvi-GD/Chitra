@@ -326,7 +326,6 @@ static bool emit_text_quads(uint32_t handle, int font_id, float size, const char
         memset(&v[i * 4], 0, 4 * sizeof(Chitra_TextVertex));
     }
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -352,7 +351,6 @@ static bool font_set_color(uint32_t handle, uint32_t color) {
         v[i].color = color;
     }
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -370,7 +368,6 @@ static bool font_set_pos(uint32_t handle, float x, float y) {
         v[i].pos[1] += dy;
     }
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -389,7 +386,6 @@ static bool font_set_opacity(uint32_t handle, float opacity) {
         v[i].color = (col & 0x00FFFFFF) | (((uint32_t)a) << 24);
     }
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -409,7 +405,6 @@ static bool font_set_rotation(uint32_t handle, float origin_x, float origin_y, f
         v[i].pos[1] = origin_y + (px * s + py * c);
     }
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -426,7 +421,6 @@ static bool font_set_scale(uint32_t handle, float origin_x, float origin_y, floa
         v[i].pos[1] = origin_y + py * scale_y;
     }
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -445,7 +439,6 @@ static bool font_set_letter_spacing(uint32_t handle, float spacing) {
         v[k * 4 + 3].pos[0] += offset;
     }
 
-    chitra_table_mark_dirty();
     return true;
 }
 

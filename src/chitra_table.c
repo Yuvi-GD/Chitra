@@ -290,6 +290,12 @@ bool chitra_is_alive(uint32_t handle) {
     return chitra_slot_is_alive(&s_cmd_table.slots[handle]);
 }
 
+void chitra_set_alive(uint32_t handle, bool alive)
+{
+    if (handle >= s_cmd_table.count) return;
+    chitra_slot_set_alive(&s_cmd_table.slots[handle], alive);
+}
+
 Chitra_CommandSlot* chitra_table_get_slot(uint32_t handle) {
     if (handle >= s_cmd_table.count) return NULL;
     return &s_cmd_table.slots[handle];
@@ -305,7 +311,6 @@ void chitra_set_draw_order(uint32_t handle, uint32_t draw_order) {
 
     uint64_t masked = slot->sort_key & ~(((uint64_t)CHITRA_DRAW_ORDER_MASK) << 34);
     slot->sort_key = masked | (((uint64_t)(draw_order & CHITRA_DRAW_ORDER_MASK)) << 34);
-    s_table_dirty = true;
 }
 
 void chitra_set_clip(uint32_t handle, uint16_t clip_id) {
@@ -319,7 +324,6 @@ void chitra_set_clip(uint32_t handle, uint16_t clip_id) {
 
         uint64_t masked = slot->sort_key & ~(((uint64_t)CHITRA_CLIP_ID_MASK) << 18);
         slot->sort_key = masked | (((uint64_t)(clip_id & CHITRA_CLIP_ID_MASK)) << 18);
-        s_table_dirty = true;
     }
 }
 
@@ -328,7 +332,6 @@ void chitra_update_clip(uint32_t handle, int x, int y, int w, int h) {
     uint16_t clip_id = chitra_get_clip_id(handle);
     if (clip_id != 0) {
         chitra_clip_update(clip_id, x, y, w, h);
-        s_table_dirty = true;
     }
 }
 
@@ -344,7 +347,6 @@ void chitra_set_texture(uint32_t handle, uint16_t texture_id) {
 
     uint64_t masked = slot->sort_key & ~((uint64_t)CHITRA_TEXTURE_ID_MASK);
     slot->sort_key = masked | ((uint64_t)(texture_id & CHITRA_TEXTURE_ID_MASK));
-    s_table_dirty = true;
 }
 
 /* =========================================================================

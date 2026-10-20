@@ -32,7 +32,6 @@ bool chitra_rect_set_bounds(uint32_t handle, float x, float y, float w, float h)
     v[3].uv[0]  = 0.0f;  v[3].uv[1]  = 1.0f;
     v[3].size[0]= w;     v[3].size[1]= h;
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -47,7 +46,6 @@ bool chitra_rect_set_radius(uint32_t handle, float radius) {
     v[2].radius_border[0] = radius;
     v[3].radius_border[0] = radius;
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -62,7 +60,6 @@ bool chitra_rect_set_border(uint32_t handle, float border) {
     v[2].radius_border[1] = border;
     v[3].radius_border[1] = border;
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -77,7 +74,6 @@ bool chitra_rect_set_fill_color(uint32_t handle, uint32_t fill_color) {
     v[2].fill_color = fill_color;
     v[3].fill_color = fill_color;
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -92,7 +88,6 @@ bool chitra_rect_set_border_color(uint32_t handle, uint32_t border_color) {
     v[2].border_color = border_color;
     v[3].border_color = border_color;
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -120,7 +115,6 @@ bool chitra_rect_set_opacity(uint32_t handle, float opacity) {
         v[i].border_color = (bc & 0x00FFFFFF) | (((uint32_t)ba) << 24);
     }
 
-    chitra_table_mark_dirty();
     return true;
 }
 
@@ -140,6 +134,5 @@ bool chitra_rect_set_rotation(uint32_t handle, float origin_x, float origin_y, f
         v[i].pos[1] = origin_y + (px * s + py * c);
     }
 
-    chitra_table_mark_dirty();
     return true;
 }

@@ -116,6 +116,7 @@ void chitra_mark_dirty(void);
 uint32_t chitra_create(uint8_t pipeline);
 void     chitra_destroy(uint32_t handle);
 bool     chitra_is_alive(uint32_t handle);
+void     chitra_set_alive(uint32_t handle, bool alive);
 
 /* Layering, Clipping, and Texturing */
 void chitra_set_draw_order(uint32_t handle, uint32_t draw_order);

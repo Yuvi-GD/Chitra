@@ -92,6 +92,7 @@ void chitra_table_clear_all(void);
 uint32_t chitra_create(uint8_t pipeline);
 void     chitra_destroy(uint32_t handle);
 bool     chitra_is_alive(uint32_t handle);
+void     chitra_set_alive(uint32_t handle, bool alive);
 
 /* Slot and Staging Memory Management */
 Chitra_CommandSlot*        chitra_table_get_slot(uint32_t handle);

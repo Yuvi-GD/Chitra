@@ -46,24 +46,30 @@ float rounded_box_sdf(vec2 center_pos, vec2 size, float radius) {
 }
 
 void main() {
+    // Fast path: sharp rectangle with no border (bypass expensive SDF math)
+    if (v_radius_border.x <= 0.0 && v_radius_border.y <= 0.0) {
+        frag_color = v_fill_color;
+        return;
+    }
+
     // Calculate SDF
     vec2 half_size = v_size * 0.5;
     vec2 center_pos = (v_uv * v_size) - half_size;
     float dist = rounded_box_sdf(center_pos, half_size, v_radius_border.x);
-    
-    // Anti-aliasing
-    float smoothed_alpha = 1.0 - smoothstep(-1.0, 1.0, dist);
-    
+
+    // 1px anti-aliased edge alpha (pure branchless, no discard)
+    float smoothed_alpha = 1.0 - smoothstep(-0.5, 0.5, dist);
+
     vec4 final_color = v_fill_color;
     
     // Borders (if border > 0)
     if (v_radius_border.y > 0.0) {
         float inner_dist = rounded_box_sdf(center_pos, half_size - vec2(v_radius_border.y), max(0.0, v_radius_border.x - v_radius_border.y));
-        float border_alpha = smoothstep(-1.0, 1.0, inner_dist);
+        float border_alpha = smoothstep(-0.5, 0.5, inner_dist);
         // Mix border color and fill color
         final_color = mix(v_fill_color, v_border_color, border_alpha);
     }
-    
+
     frag_color = final_color * smoothed_alpha;
 }
 @end
