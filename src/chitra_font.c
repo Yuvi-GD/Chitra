@@ -24,6 +24,35 @@ static uint16_t     s_atlas_texture_id = 0;
 static int          s_atlas_width = 0;
 static int          s_atlas_height = 0;
 
+/* A text position is its requested baseline origin, not its first glyph vertex.
+   Glyph bearings make those coordinates different. Only text handles reserve
+   entries; the table is indexed by the renderer's existing handle. */
+typedef struct {
+    float x;
+    float y;
+    bool valid;
+} Chitra_TextOrigin;
+static Chitra_TextOrigin* s_text_origins = NULL;
+static size_t s_text_origin_capacity = 0;
+
+static bool reserve_text_origin(uint32_t handle) {
+    if (handle < s_text_origin_capacity) return true;
+    size_t next = s_text_origin_capacity ? s_text_origin_capacity : 64;
+    while (next <= handle) {
+        if (next > SIZE_MAX / 2) return false;
+        next *= 2;
+    }
+    if (next > SIZE_MAX / sizeof(*s_text_origins)) return false;
+    Chitra_TextOrigin* grown = (Chitra_TextOrigin*)realloc(s_text_origins,
+                                                          next * sizeof(*s_text_origins));
+    if (!grown) return false;
+    memset(grown + s_text_origin_capacity, 0,
+           (next - s_text_origin_capacity) * sizeof(*grown));
+    s_text_origins = grown;
+    s_text_origin_capacity = next;
+    return true;
+}
+
 /* =========================================================================
  * Fontstash Custom Render Callbacks
  * ========================================================================= */
@@ -86,6 +115,9 @@ static void font_term(void) {
         fonsDeleteInternal(s_fons);
         s_fons = NULL;
     }
+    free(s_text_origins);
+    s_text_origins = NULL;
+    s_text_origin_capacity = 0;
 }
 
 static int font_load_font(const char* name, const char* path) {
@@ -226,10 +258,12 @@ static bool emit_text_quads(uint32_t handle, int font_id, float size, const char
         return false;
     }
     if (font_id < 0) font_id = 0;
+    if (!reserve_text_origin(handle)) return false;
 
     uint32_t glyph_count = count_text_glyphs(text);
     if (glyph_count == 0) {
         chitra_table_alloc_vertices(CHITRA_PIPELINE_TEXT, handle, 0);
+        s_text_origins[handle] = (Chitra_TextOrigin){x, y, true};
         return true;
     }
 
@@ -326,6 +360,7 @@ static bool emit_text_quads(uint32_t handle, int font_id, float size, const char
         memset(&v[i * 4], 0, 4 * sizeof(Chitra_TextVertex));
     }
 
+    s_text_origins[handle] = (Chitra_TextOrigin){x, y, true};
     return true;
 }
 
@@ -358,15 +393,19 @@ static bool font_set_pos(uint32_t handle, float x, float y) {
     uint8_t pipe;
     uint32_t count;
     Chitra_TextVertex* v = (Chitra_TextVertex*)chitra_table_get_vertices(handle, &pipe, &count);
-    if (!v || pipe != CHITRA_PIPELINE_TEXT || count == 0) return false;
+    if (!v || pipe != CHITRA_PIPELINE_TEXT || count == 0 ||
+        handle >= s_text_origin_capacity || !s_text_origins[handle].valid) return false;
 
-    float dx = x - v[0].pos[0];
-    float dy = y - v[0].pos[1];
+    float dx = x - s_text_origins[handle].x;
+    float dy = y - s_text_origins[handle].y;
 
     for (uint32_t i = 0; i < count; i++) {
         v[i].pos[0] += dx;
         v[i].pos[1] += dy;
     }
+
+    s_text_origins[handle].x = x;
+    s_text_origins[handle].y = y;
 
     return true;
 }
