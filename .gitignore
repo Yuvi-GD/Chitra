@@ -5,6 +5,7 @@ build/
 *.dll
 *.so
 *.dylib
-src/backends/shaders/gen/
+src/backends/shaders/gen/*
+!src/backends/shaders/gen/.gitkeep
 
 docs/archive

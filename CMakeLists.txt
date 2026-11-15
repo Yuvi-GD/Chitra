@@ -52,6 +52,7 @@ else()
 endif()
 set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/backends/shaders")
 set(GEN_DIR "${SHADER_DIR}/gen")
+file(MAKE_DIRECTORY ${GEN_DIR})
 
 set(SHADER_FILES
     "chitra_shape.glsl"
@@ -66,6 +67,7 @@ foreach(SHADER_FILE ${SHADER_FILES})
     
     add_custom_command(
         OUTPUT ${OUTPUT_PATH}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${GEN_DIR}
         COMMAND ${SHDC_EXECUTABLE} -i ${INPUT_PATH} -o ${OUTPUT_PATH} -l glsl410:hlsl5:metal_macos:glsl300es:wgsl
         DEPENDS ${INPUT_PATH}
         COMMENT "Compiling Shader: ${SHADER_FILE} -> ${OUTPUT_PATH}"
