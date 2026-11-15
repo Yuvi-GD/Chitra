@@ -10,14 +10,16 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Chitra supports multiple rendering backends via Sokol.
 # You can override this by passing -DCHITRA_BACKEND=<BACKEND> to CMake.
 # ==============================================================================
-set(CHITRA_BACKEND "AUTO" CACHE STRING "Sokol graphics backend (AUTO, D3D11, GLCORE, METAL, GLES3)")
-set_property(CACHE CHITRA_BACKEND PROPERTY STRINGS AUTO D3D11 GLCORE METAL GLES3)
+set(CHITRA_BACKEND "AUTO" CACHE STRING "Sokol graphics backend (AUTO, D3D11, GLCORE, METAL, GLES3, WGPU)")
+set_property(CACHE CHITRA_BACKEND PROPERTY STRINGS AUTO D3D11 GLCORE METAL GLES3 WGPU)
 
 if(CHITRA_BACKEND STREQUAL "AUTO")
     if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         set(CHITRA_BACKEND_DEF "SOKOL_D3D11")
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         set(CHITRA_BACKEND_DEF "SOKOL_METAL")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+        set(CHITRA_BACKEND_DEF "SOKOL_GLES3")
     else()
         set(CHITRA_BACKEND_DEF "SOKOL_GLCORE")
     endif()
@@ -33,7 +35,21 @@ message(STATUS "[Chitra] Configured to use backend: ${CHITRA_BACKEND_DEF}")
 # We compile GLSL shaders into C headers for multiple target backends.
 # ==============================================================================
 set(SOKOL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sokol")
-set(SHDC_EXECUTABLE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sokol-tools/bin/win32/sokol-shdc.exe")
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Windows")
+    set(SHDC_EXECUTABLE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sokol-tools/bin/win32/sokol-shdc.exe")
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm|aarch64")
+        set(SHDC_EXECUTABLE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sokol-tools/bin/osx_arm64/sokol-shdc")
+    else()
+        set(SHDC_EXECUTABLE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sokol-tools/bin/osx/sokol-shdc")
+    endif()
+else()
+    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "arm|aarch64")
+        set(SHDC_EXECUTABLE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sokol-tools/bin/linux_arm64/sokol-shdc")
+    else()
+        set(SHDC_EXECUTABLE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/sokol-tools/bin/linux/sokol-shdc")
+    endif()
+endif()
 set(SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/backends/shaders")
 set(GEN_DIR "${SHADER_DIR}/gen")
 
@@ -50,7 +66,7 @@ foreach(SHADER_FILE ${SHADER_FILES})
     
     add_custom_command(
         OUTPUT ${OUTPUT_PATH}
-        COMMAND ${SHDC_EXECUTABLE} -i ${INPUT_PATH} -o ${OUTPUT_PATH} -l glsl410:hlsl5:metal_macos
+        COMMAND ${SHDC_EXECUTABLE} -i ${INPUT_PATH} -o ${OUTPUT_PATH} -l glsl410:hlsl5:metal_macos:glsl300es:wgsl
         DEPENDS ${INPUT_PATH}
         COMMENT "Compiling Shader: ${SHADER_FILE} -> ${OUTPUT_PATH}"
     )
@@ -93,32 +109,24 @@ target_include_directories(chitra PRIVATE
 
 # Pass the backend selection macro to the C compiler (e.g., -DSOKOL_D3D11)
 target_compile_definitions(chitra PUBLIC ${CHITRA_BACKEND_DEF})
-
-# ==============================================================================
-# SECTION 4: Sandbox Executable
-# ==============================================================================
-# A standalone executable for testing Chitra rendering independently.
-# ==============================================================================
-add_executable(chitra_sandbox sandbox/chitra_sandbox.c)
-target_link_libraries(chitra_sandbox PRIVATE chitra)
-target_include_directories(chitra_sandbox PRIVATE "${SOKOL_DIR}")
-
-# Platform-specific system libraries required by Sokol
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_libraries(chitra_sandbox PRIVATE X11 Xi Xcursor GL pthread dl m)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    target_link_libraries(chitra_sandbox PRIVATE dwmapi)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    target_link_libraries(chitra_sandbox PRIVATE "-framework Cocoa" "-framework QuartzCore" "-framework Metal" "-framework MetalKit")
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    if(CHITRA_BACKEND_DEF STREQUAL "SOKOL_GLES3")
+        target_link_options(chitra PUBLIC "-sUSE_WEBGL2=1")
+    elseif(CHITRA_BACKEND_DEF STREQUAL "SOKOL_WGPU")
+        target_compile_options(chitra PUBLIC "--use-port=emdawnwebgpu")
+        target_link_options(chitra PUBLIC "--use-port=emdawnwebgpu" "-sDEFAULT_TO_CXX")
+    endif()
 endif()
 
 # ==============================================================================
-# SECTION 5: Headless Texture Pipeline Test
+# SECTION 4: Examples & Standalone Tools
 # ==============================================================================
-add_executable(test_texture tests/test_texture.c)
-target_link_libraries(test_texture PRIVATE chitra)
-target_include_directories(test_texture PRIVATE "${SOKOL_DIR}")
-if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    target_link_libraries(test_texture PRIVATE dwmapi)
+# Standalone examples and tests are separated into examples/CMakeLists.txt.
+# Disabled by default when Chitra is included as a subproject by Tether.
+# ==============================================================================
+option(CHITRA_BUILD_EXAMPLES "Build Chitra standalone sandbox and examples" OFF)
+if(CHITRA_BUILD_EXAMPLES)
+    add_subdirectory(examples)
 endif()
+
 

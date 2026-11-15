@@ -51,6 +51,10 @@ static HANDLE s_waitable_timer = NULL;
  * POSIX:   nanosleep(), restarted automatically on EINTR.
  * ------------------------------------------------------------------------- */
 static void chitra_sleep_ms(double ms) {
+#if defined(__EMSCRIPTEN__)
+    (void)ms;
+    return;
+#else
     if (ms <= 0.0) return;
 
 #ifdef _WIN32
@@ -72,6 +76,7 @@ static void chitra_sleep_ms(double ms) {
     };
     while (nanosleep(&req, &req) != 0 && errno == EINTR) {}
 #endif
+#endif
 }
 
 /* -------------------------------------------------------------------------
@@ -85,7 +90,9 @@ static void chitra_sleep_ms(double ms) {
  *          platform-specific APIs (poll/epoll on X11/Wayland) — out of scope.
  * ------------------------------------------------------------------------- */
 static void chitra_idle_wait(void) {
-#ifdef _WIN32
+#if defined(__EMSCRIPTEN__)
+    return;
+#elif defined(_WIN32)
     MsgWaitForMultipleObjectsEx(0, NULL, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
 #else
     struct timespec req = { .tv_sec = 0, .tv_nsec = 16000000 };
@@ -142,7 +149,10 @@ static void sokol_frame(void) {
     /* 1. Pre-Frame: Let the app update state & command list */
     if (s_config.on_frame) s_config.on_frame();
 
-    /* 2. Main-Frame: Render scene if dirty */
+    /* 2. Main-Frame: Render scene */
+#if defined(__EMSCRIPTEN__)
+    chitra_frame();
+#else
     if (chitra_table_is_dirty()) {
         s_dirty_countdown = 3;
     }
@@ -158,6 +168,7 @@ static void sokol_frame(void) {
             chitra_idle_wait();
         }
     }
+#endif
 
     /* 3. Post-Frame: App post-frame callback + HAL frame pacing */
     if (s_config.on_post_frame) s_config.on_post_frame();
@@ -233,6 +244,7 @@ static void hal_init(const Chitra_Config* config) {
     s_desc.frame_cb    = sokol_frame;
     s_desc.cleanup_cb  = sokol_cleanup;
     s_desc.event_cb    = sokol_event;
+    s_desc.high_dpi    = true;
     s_desc.logger.func = slog_func;
 }
 
