@@ -16,9 +16,9 @@ set_property(CACHE CHITRA_BACKEND PROPERTY STRINGS AUTO D3D11 GLCORE METAL GLES3
 if(CHITRA_BACKEND STREQUAL "AUTO")
     if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         set(CHITRA_BACKEND_DEF "SOKOL_D3D11")
-    elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
         set(CHITRA_BACKEND_DEF "SOKOL_METAL")
-    elseif(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         set(CHITRA_BACKEND_DEF "SOKOL_GLES3")
     else()
         set(CHITRA_BACKEND_DEF "SOKOL_GLCORE")
@@ -68,7 +68,7 @@ foreach(SHADER_FILE ${SHADER_FILES})
     add_custom_command(
         OUTPUT ${OUTPUT_PATH}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${GEN_DIR}
-        COMMAND ${SHDC_EXECUTABLE} -i ${INPUT_PATH} -o ${OUTPUT_PATH} -l glsl410:hlsl5:metal_macos:glsl300es:wgsl
+        COMMAND ${SHDC_EXECUTABLE} -i ${INPUT_PATH} -o ${OUTPUT_PATH} -l glsl410:hlsl5:metal_macos:metal_ios:metal_sim:glsl300es:wgsl
         DEPENDS ${INPUT_PATH}
         COMMENT "Compiling Shader: ${SHADER_FILE} -> ${OUTPUT_PATH}"
     )
@@ -111,7 +111,36 @@ target_include_directories(chitra PRIVATE
 
 # Pass the backend selection macro to the C compiler (e.g., -DSOKOL_D3D11)
 target_compile_definitions(chitra PUBLIC ${CHITRA_BACKEND_DEF})
-if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+
+if(APPLE)
+    set_source_files_properties(src/backends/sokol_impl.c PROPERTIES COMPILE_FLAGS "-x objective-c")
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        target_link_libraries(chitra PUBLIC
+            "-framework UIKit"
+            "-framework Metal"
+            "-framework MetalKit"
+            "-framework QuartzCore"
+            "-framework AudioToolbox"
+            "-framework AVFoundation"
+        )
+    else()
+        target_link_libraries(chitra PUBLIC
+            "-framework Cocoa"
+            "-framework Metal"
+            "-framework MetalKit"
+            "-framework QuartzCore"
+            "-framework AudioToolbox"
+        )
+    endif()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    target_link_libraries(chitra PUBLIC
+        GLESv3
+        EGL
+        android
+        log
+        m
+    )
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     if(CHITRA_BACKEND_DEF STREQUAL "SOKOL_GLES3")
         target_link_options(chitra PUBLIC "-sUSE_WEBGL2=1")
     elseif(CHITRA_BACKEND_DEF STREQUAL "SOKOL_WGPU")
@@ -122,9 +151,6 @@ endif()
 
 # ==============================================================================
 # SECTION 4: Examples & Standalone Tools
-# ==============================================================================
-# Standalone examples and tests are separated into examples/CMakeLists.txt.
-# Disabled by default when Chitra is included as a subproject by Tether.
 # ==============================================================================
 option(CHITRA_BUILD_EXAMPLES "Build Chitra standalone sandbox and examples" OFF)
 if(CHITRA_BUILD_EXAMPLES)
