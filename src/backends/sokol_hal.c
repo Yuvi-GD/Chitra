@@ -193,24 +193,88 @@ static void sokol_cleanup(void) {
 #endif
 }
 
+static float s_last_touch_x = 0.0f;
+static float s_last_touch_y = 0.0f;
+
 static void sokol_event(const sapp_event* e) {
     if (s_config.on_event) {
         Chitra_InputEvent ce = {0};
-        chitra_map_pointer(e->mouse_x, e->mouse_y, &ce.mouse_x, &ce.mouse_y);
-        ce.window_width = chitra_width();
-        ce.window_height = chitra_height();
+        float in_x = e->mouse_x;
+        float in_y = e->mouse_y;
+        int button = e->mouse_button;
         
         switch (e->type) {
-            case SAPP_EVENTTYPE_MOUSE_MOVE:   ce.type = CHITRA_EVENT_MOUSE_MOVE; break;
-            case SAPP_EVENTTYPE_MOUSE_DOWN:   ce.type = CHITRA_EVENT_MOUSE_DOWN; ce.button = e->mouse_button; break;
-            case SAPP_EVENTTYPE_MOUSE_UP:     ce.type = CHITRA_EVENT_MOUSE_UP;   ce.button = e->mouse_button; break;
-            case SAPP_EVENTTYPE_MOUSE_SCROLL: ce.type = CHITRA_EVENT_MOUSE_SCROLL; ce.scroll_x = e->scroll_x; ce.scroll_y = e->scroll_y; break;
-            case SAPP_EVENTTYPE_KEY_DOWN:     ce.type = CHITRA_EVENT_KEY_DOWN;   ce.key_code = e->key_code; break;
-            case SAPP_EVENTTYPE_KEY_UP:       ce.type = CHITRA_EVENT_KEY_UP;     ce.key_code = e->key_code; break;
-            case SAPP_EVENTTYPE_CHAR:         ce.type = CHITRA_EVENT_CHAR;       ce.char_code = e->char_code; break;
-            case SAPP_EVENTTYPE_RESIZED:      ce.type = CHITRA_EVENT_RESIZED;    break;
-            default: ce.type = CHITRA_EVENT_NONE; break;
+            case SAPP_EVENTTYPE_TOUCHES_BEGAN:
+                if (e->num_touches > 0) {
+                    s_last_touch_x = e->touches[0].pos_x;
+                    s_last_touch_y = e->touches[0].pos_y;
+                }
+                in_x = s_last_touch_x;
+                in_y = s_last_touch_y;
+                button = 0; /* Map primary touch to left button */
+                ce.type = CHITRA_EVENT_MOUSE_DOWN;
+                ce.button = button;
+                break;
+            case SAPP_EVENTTYPE_TOUCHES_MOVED:
+                if (e->num_touches > 0) {
+                    s_last_touch_x = e->touches[0].pos_x;
+                    s_last_touch_y = e->touches[0].pos_y;
+                }
+                in_x = s_last_touch_x;
+                in_y = s_last_touch_y;
+                ce.type = CHITRA_EVENT_MOUSE_MOVE;
+                break;
+            case SAPP_EVENTTYPE_TOUCHES_ENDED:
+            case SAPP_EVENTTYPE_TOUCHES_CANCELLED:
+                if (e->num_touches > 0) {
+                    s_last_touch_x = e->touches[0].pos_x;
+                    s_last_touch_y = e->touches[0].pos_y;
+                }
+                in_x = s_last_touch_x;
+                in_y = s_last_touch_y;
+                button = 0; /* Map primary touch release to left button */
+                ce.type = CHITRA_EVENT_MOUSE_UP;
+                ce.button = button;
+                break;
+            case SAPP_EVENTTYPE_MOUSE_MOVE:
+                ce.type = CHITRA_EVENT_MOUSE_MOVE;
+                break;
+            case SAPP_EVENTTYPE_MOUSE_DOWN:
+                ce.type = CHITRA_EVENT_MOUSE_DOWN;
+                ce.button = button;
+                break;
+            case SAPP_EVENTTYPE_MOUSE_UP:
+                ce.type = CHITRA_EVENT_MOUSE_UP;
+                ce.button = button;
+                break;
+            case SAPP_EVENTTYPE_MOUSE_SCROLL:
+                ce.type = CHITRA_EVENT_MOUSE_SCROLL;
+                ce.scroll_x = e->scroll_x;
+                ce.scroll_y = e->scroll_y;
+                break;
+            case SAPP_EVENTTYPE_KEY_DOWN:
+                ce.type = CHITRA_EVENT_KEY_DOWN;
+                ce.key_code = e->key_code;
+                break;
+            case SAPP_EVENTTYPE_KEY_UP:
+                ce.type = CHITRA_EVENT_KEY_UP;
+                ce.key_code = e->key_code;
+                break;
+            case SAPP_EVENTTYPE_CHAR:
+                ce.type = CHITRA_EVENT_CHAR;
+                ce.char_code = e->char_code;
+                break;
+            case SAPP_EVENTTYPE_RESIZED:
+                ce.type = CHITRA_EVENT_RESIZED;
+                break;
+            default:
+                ce.type = CHITRA_EVENT_NONE;
+                break;
         }
+        
+        chitra_map_pointer(in_x, in_y, &ce.mouse_x, &ce.mouse_y);
+        ce.window_width = chitra_width();
+        ce.window_height = chitra_height();
         
         if (ce.type != CHITRA_EVENT_NONE) {
             s_config.on_event(&ce);
