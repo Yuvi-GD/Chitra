@@ -89,21 +89,25 @@ set(SHADER_FILES
 
 set(GENERATED_HEADERS "")
 
-foreach(SHADER_FILE ${SHADER_FILES})
-    set(INPUT_PATH "${SHADER_DIR}/${SHADER_FILE}")
-    set(OUTPUT_PATH "${GEN_DIR}/${SHADER_FILE}.h")
-    
-    add_custom_command(
-        OUTPUT ${OUTPUT_PATH}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${GEN_DIR}
-        COMMAND ${SHDC_EXECUTABLE} -i ${INPUT_PATH} -o ${OUTPUT_PATH} -l glsl410:hlsl5:metal_macos:metal_ios:metal_sim:glsl300es:wgsl
-        DEPENDS ${INPUT_PATH}
-        COMMENT "Compiling Shader: ${SHADER_FILE} -> ${OUTPUT_PATH}"
-    )
-    list(APPEND GENERATED_HEADERS ${OUTPUT_PATH})
-endforeach()
-
-add_custom_target(chitra_shaders DEPENDS ${GENERATED_HEADERS})
+if(EXISTS "${SHDC_EXECUTABLE}")
+    foreach(SHADER_FILE ${SHADER_FILES})
+        set(INPUT_PATH "${SHADER_DIR}/${SHADER_FILE}")
+        set(OUTPUT_PATH "${GEN_DIR}/${SHADER_FILE}.h")
+        
+        add_custom_command(
+            OUTPUT ${OUTPUT_PATH}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${GEN_DIR}
+            COMMAND ${SHDC_EXECUTABLE} -i ${INPUT_PATH} -o ${OUTPUT_PATH} -l glsl410:hlsl5:metal_macos:metal_ios:metal_sim:glsl300es:wgsl
+            DEPENDS ${INPUT_PATH}
+            COMMENT "Compiling Shader: ${SHADER_FILE} -> ${OUTPUT_PATH}"
+        )
+        list(APPEND GENERATED_HEADERS ${OUTPUT_PATH})
+    endforeach()
+    add_custom_target(chitra_shaders DEPENDS ${GENERATED_HEADERS})
+else()
+    message(STATUS "[Chitra] sokol-shdc compiler not found; using pre-generated shader headers in ${GEN_DIR}")
+    add_custom_target(chitra_shaders)
+endif()
 
 # ==============================================================================
 # SECTION 3: Chitra Static Library
