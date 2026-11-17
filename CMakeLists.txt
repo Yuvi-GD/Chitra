@@ -156,6 +156,8 @@ elseif(APPLE)
         # Apple iOS (Metal)
         target_link_libraries(chitra PUBLIC
             "-framework UIKit"
+            "-framework Foundation"
+            "-framework CoreGraphics"
             "-framework Metal"
             "-framework MetalKit"
             "-framework QuartzCore"

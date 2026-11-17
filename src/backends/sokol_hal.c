@@ -150,7 +150,7 @@ static void sokol_frame(void) {
     if (s_config.on_frame) s_config.on_frame();
 
     /* 2. Main-Frame: Render scene */
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || defined(__ANDROID__)
     chitra_frame();
 #else
     if (chitra_table_is_dirty()) {
@@ -329,3 +329,16 @@ static const Chitra_HAL_API s_api = {
 const Chitra_HAL_API* chitra_hal_api(void) {
     return &s_api;
 }
+
+#if defined(__ANDROID__)
+__attribute__((weak)) int main(int argc, char* argv[]) {
+    (void)argc;
+    (void)argv;
+    return 0;
+}
+
+sapp_desc sokol_main(int argc, char* argv[]) {
+    main(argc, argv);
+    return s_desc;
+}
+#endif
