@@ -2,7 +2,9 @@
 #define SOKOL_GFX_IMPL
 #define SOKOL_GLUE_IMPL
 #define SOKOL_LOG_IMPL
+#if !defined(__ANDROID__)
 #define SOKOL_NO_ENTRY
+#endif
 
 /* Backend is now defined by CMake (e.g. -DSOKOL_D3D11, -DSOKOL_GLCORE) */
 
