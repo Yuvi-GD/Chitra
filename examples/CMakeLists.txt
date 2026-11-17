@@ -21,6 +21,13 @@ endif()
 
 # Headless Texture Pipeline Test
 add_executable(test_texture "${CMAKE_CURRENT_SOURCE_DIR}/../tests/test_texture.c")
+set_target_properties(test_texture PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/Debug/test"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release/test"
+    RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/RelWithDebInfo/test"
+    RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}/MinSizeRel/test"
+)
 target_link_libraries(test_texture PRIVATE chitra)
 target_include_directories(test_texture PRIVATE "${SOKOL_DIR}")
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
