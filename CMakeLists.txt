@@ -46,6 +46,8 @@ if(CHITRA_BACKEND STREQUAL "AUTO")
         set(CHITRA_BACKEND_DEF "SOKOL_METAL")
     elseif(CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         set(CHITRA_BACKEND_DEF "SOKOL_GLES3")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME MATCHES "BSD")
+        set(CHITRA_BACKEND_DEF "SOKOL_GLCORE")
     else()
         set(CHITRA_BACKEND_DEF "SOKOL_GLCORE")
     endif()
@@ -138,9 +140,16 @@ target_include_directories(chitra PRIVATE
 # Pass the backend selection macro to the C compiler (e.g., -DSOKOL_D3D11)
 target_compile_definitions(chitra PUBLIC ${CHITRA_BACKEND_DEF})
 
-if(APPLE)
+if(WIN32)
+    # Windows Desktop (Direct3D 11 default)
+    target_link_libraries(chitra PUBLIC dwmapi)
+    if(CHITRA_BACKEND_DEF STREQUAL "SOKOL_GLCORE")
+        target_link_libraries(chitra PUBLIC opengl32 gdi32)
+    endif()
+elseif(APPLE)
     set_source_files_properties(src/backends/sokol_impl.c PROPERTIES COMPILE_FLAGS "-x objective-c")
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        # Apple iOS (Metal)
         target_link_libraries(chitra PUBLIC
             "-framework UIKit"
             "-framework Metal"
@@ -150,6 +159,7 @@ if(APPLE)
             "-framework AVFoundation"
         )
     else()
+        # Apple macOS (Metal)
         target_link_libraries(chitra PUBLIC
             "-framework Cocoa"
             "-framework Metal"
@@ -159,6 +169,7 @@ if(APPLE)
         )
     endif()
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # Android (OpenGLES 3)
     target_link_libraries(chitra PUBLIC
         GLESv3
         EGL
@@ -167,12 +178,23 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Android")
         m
     )
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+    # WebAssembly (WebGL2 or WebGPU)
     if(CHITRA_BACKEND_DEF STREQUAL "SOKOL_GLES3")
         target_link_options(chitra PUBLIC "-sUSE_WEBGL2=1")
     elseif(CHITRA_BACKEND_DEF STREQUAL "SOKOL_WGPU")
         target_compile_options(chitra PUBLIC "--use-port=emdawnwebgpu")
         target_link_options(chitra PUBLIC "--use-port=emdawnwebgpu" "-sDEFAULT_TO_CXX")
     endif()
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME MATCHES "BSD")
+    # Linux Desktop (X11 / OpenGL Core or OpenGLES 3)
+    if(CHITRA_BACKEND_DEF STREQUAL "SOKOL_GLES3")
+        target_link_libraries(chitra PUBLIC X11 Xi Xcursor GLESv2 EGL pthread dl m)
+    else()
+        target_link_libraries(chitra PUBLIC X11 Xi Xcursor GL pthread dl m)
+    endif()
+else()
+    # Generic POSIX fallback
+    target_link_libraries(chitra PUBLIC pthread dl m)
 endif()
 
 # ==============================================================================
